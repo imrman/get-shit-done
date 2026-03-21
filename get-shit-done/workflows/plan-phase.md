@@ -755,7 +755,7 @@ Verification: {Passed | Passed with override | Skipped}
 **Also available:**
 - cat .planning/phases/{phase-dir}/*-PLAN.md — review plans
 - /gsd:plan-phase {X} --research — re-research first
-- /gsd:review {X} --all — peer review plans with external AIs
+- /gsd:review --phase {X} --all — peer review plans with external AIs
 - /gsd:plan-phase {X} --reviews — replan incorporating review feedback
 
 ───────────────────────────────────────────────────────────────
