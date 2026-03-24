@@ -1128,7 +1128,12 @@ function generateCodexAgentToml(agentName, agentContent) {
  * Generate the GSD config block for Codex config.toml.
  * @param {Array<{name: string, description: string}>} agents
  */
-function generateCodexConfigBlock(agents) {
+function generateCodexConfigBlock(agents, targetDir) {
+  // Use absolute paths when targetDir is provided — Codex ≥0.116 requires
+  // AbsolutePathBuf for config_file and cannot resolve relative paths.
+  const agentsPrefix = targetDir
+    ? path.join(targetDir, 'agents').replace(/\\/g, '/')
+    : 'agents';
   const lines = [
     GSD_CODEX_MARKER,
     '',
@@ -1137,7 +1142,7 @@ function generateCodexConfigBlock(agents) {
   for (const { name, description } of agents) {
     lines.push(`[agents.${name}]`);
     lines.push(`description = ${JSON.stringify(description)}`);
-    lines.push(`config_file = "agents/${name}.toml"`);
+    lines.push(`config_file = "${agentsPrefix}/${name}.toml"`);
     lines.push('');
   }
 
@@ -2124,7 +2129,21 @@ function ensureCodexHooksFeature(configContent) {
   if (!configContent) {
     return { content: featuresBlock, ownership: 'section' };
   }
-  return { content: featuresBlock + eol + configContent, ownership: 'section' };
+  // Insert [features] before the first table header, preserving bare top-level keys.
+  // Prepending would trap them under [features] where Codex expects only booleans (#1202).
+  const firstTableHeader = lineRecords.find(r => r.tableHeader);
+  if (firstTableHeader) {
+    const before = configContent.slice(0, firstTableHeader.start);
+    const after = configContent.slice(firstTableHeader.start);
+    const needsGap = before.length > 0 && !before.endsWith(eol + eol);
+    return {
+      content: before + (needsGap ? eol : '') + featuresBlock + eol + after,
+      ownership: 'section',
+    };
+  }
+  // No table headers — append [features] after top-level keys
+  const needsGap = configContent.length > 0 && !configContent.endsWith(eol + eol);
+  return { content: configContent + (needsGap ? eol : '') + featuresBlock, ownership: 'section' };
 }
 
 function hasEnabledCodexHooksFeature(configContent) {
@@ -2249,7 +2268,7 @@ function installCodexConfig(targetDir, agentsSrc) {
     fs.writeFileSync(path.join(agentsTomlDir, `${name}.toml`), tomlContent);
   }
 
-  const gsdBlock = generateCodexConfigBlock(agents);
+  const gsdBlock = generateCodexConfigBlock(agents, targetDir);
   mergeCodexConfig(configPath, gsdBlock);
 
   return agents.length;
