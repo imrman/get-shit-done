@@ -250,9 +250,13 @@ export class PhaseRunner {
     }
 
     // ── Step 6: Advance ──
-    if (!halted) {
+    // Only advance if verify passed — never mark a phase complete when gaps were found.
+    const verifyPassed = steps.every(s => s.step !== PhaseStepType.Verify || s.success);
+    if (!halted && verifyPassed) {
       const advanceResult = await this.runAdvanceStep(phaseNumber, sessionOpts, callbacks);
       steps.push(advanceResult);
+    } else if (!halted && !verifyPassed) {
+      this.logger?.warn(`Skipping advance for phase ${phaseNumber}: verification found gaps`);
     }
 
     const totalDurationMs = Date.now() - startTime;
