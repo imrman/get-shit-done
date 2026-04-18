@@ -27,7 +27,7 @@ import { loadConfig } from '../config.js';
 import { resolveModel, MODEL_PROFILES } from './config-query.js';
 import { findPhase } from './phase.js';
 import { roadmapGetPhase, getMilestoneInfo } from './roadmap.js';
-import { planningPaths, normalizePhaseName, toPosixPath } from './helpers.js';
+import { planningPaths, normalizePhaseName, toPosixPath, resolveAgentsDir } from './helpers.js';
 import type { QueryHandler } from './utils.js';
 
 // ─── Internal helpers ──────────────────────────────────────────────────────
@@ -82,8 +82,7 @@ function getLatestCompletedMilestone(projectDir: string): { version: string; nam
  * Port of checkAgentsInstalled from core.cjs lines 1274-1306.
  */
 function checkAgentsInstalled(): { agents_installed: boolean; missing_agents: string[] } {
-  const agentsDir = process.env.GSD_AGENTS_DIR
-    || join(homedir(), '.claude', 'agents');
+  const agentsDir = resolveAgentsDir();
   const expectedAgents = Object.keys(MODEL_PROFILES);
 
   if (!existsSync(agentsDir)) {

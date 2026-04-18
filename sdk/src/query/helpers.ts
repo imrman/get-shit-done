@@ -19,7 +19,26 @@
 
 import { join, relative, resolve, isAbsolute, normalize } from 'node:path';
 import { realpath } from 'node:fs/promises';
+import { homedir } from 'node:os';
 import { GSDError, ErrorClassification } from '../errors.js';
+
+// ─── resolveAgentsDir ──────────────────────────────────────────────────────
+
+/**
+ * Resolve the Claude Code agents directory using the same precedence as the
+ * installer (`bin/install.js` getGlobalDir for Claude):
+ *   1. GSD_AGENTS_DIR   — explicit SDK override
+ *   2. CLAUDE_CONFIG_DIR/agents — matches installer's --config-dir / env
+ *   3. ~/.claude/agents — default
+ *
+ * Must mirror `bin/install.js:389-396` for Claude. Used by both
+ * `query/init.ts:checkAgentsInstalled` and `init-runner.ts`.
+ */
+export function resolveAgentsDir(): string {
+  if (process.env.GSD_AGENTS_DIR) return process.env.GSD_AGENTS_DIR;
+  if (process.env.CLAUDE_CONFIG_DIR) return join(process.env.CLAUDE_CONFIG_DIR, 'agents');
+  return join(homedir(), '.claude', 'agents');
+}
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
