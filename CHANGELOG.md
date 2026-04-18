@@ -11,6 +11,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 - **Installer now installs `@gsd-build/sdk` automatically** so `gsd-sdk` lands on PATH. Resolves `command not found: gsd-sdk` errors that affected every `/gsd-*` command after a fresh install or `/gsd-update` to 1.36+. Adds `--no-sdk` to opt out and `--sdk` to force reinstall. Implements the `--sdk` flag that was previously documented in README but never wired up (#2385)
+- **Prompt sanitization now neutralizes the full delimiter family it already classifies as injection** — `<user>` tags, whitespace-padded delimiter tags, closing `[\/SYSTEM]` / `[\/INST]` markers, and closing `<</SYS>>` markers no longer pass through `sanitizeForPrompt()`. Fixes a security gap where malicious commit messages or other user-controlled text could retain prompt-boundary markers despite being "sanitized" (#2394)
 
 ## [1.37.1] - 2026-04-17
 

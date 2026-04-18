@@ -163,7 +163,7 @@ const OBFUSCATION_PATTERN_ENTRIES = [
   },
   {
     pattern: /<\/?(system|human|assistant|user)\s*>/i,
-    message: 'Delimiter injection pattern: <system>/<assistant>/<user> tag detected',
+    message: 'Delimiter injection pattern: system/assistant/user-style tag detected',
   },
   {
     pattern: /0x[0-9a-fA-F]{16,}/,
@@ -245,14 +245,17 @@ function sanitizeForPrompt(text) {
   // Neutralize XML/HTML tags that mimic system boundaries
   // Replace < > with full-width equivalents to prevent tag interpretation
   // Note: <instructions> is excluded — GSD uses it as legitimate prompt structure
-  sanitized = sanitized.replace(/<(\/?)(?:system|assistant|human)>/gi,
-    (_, slash) => `＜${slash || ''}system-text＞`);
+  sanitized = sanitized.replace(
+    /<(\/?)(system|assistant|human|user)\s*>/gi,
+    (_, slash, role) => `＜${slash || ''}${String(role).toLowerCase()}-text＞`
+  );
 
   // Neutralize [SYSTEM] / [INST] markers
-  sanitized = sanitized.replace(/\[(SYSTEM|INST)\]/gi, '[$1-TEXT]');
+  sanitized = sanitized.replace(/\[(\/?)(SYSTEM|INST)\]/gi,
+    (_, slash, marker) => `[${slash || ''}${marker.toUpperCase()}-TEXT]`);
 
   // Neutralize <<SYS>> markers
-  sanitized = sanitized.replace(/<<\s*SYS\s*>>/gi, '«SYS-TEXT»');
+  sanitized = sanitized.replace(/<<\s*\/?\s*SYS\s*>>/gi, '«SYS-TEXT»');
 
   return sanitized;
 }
