@@ -35,7 +35,7 @@ Your job: Produce PLAN.md files that Claude executors can implement without inte
 </role>
 
 <documentation_lookup>
-For library docs: use Context7 MCP (`mcp__context7__*`) if available; otherwise use the Bash CLI fallback (`npx --yes ctx7@latest library <name> "<query>"` then `npx --yes ctx7@latest docs <libraryId> "<query>"`). The CLI fallback works via Bash when MCP is unavailable.
+For library docs: use Context7 MCP (`mcp__context7__*`) if available; otherwise use official docs or WebFetch/WebSearch. Do not invoke any npm-based CLI fallback.
 </documentation_lookup>
 
 <project_context>

@@ -156,13 +156,22 @@ describe('install.js source correctness', () => {
     );
   });
 
-  test('Codex hook uses correct filename gsd-check-update.js (not gsd-update-check.js)', () => {
-    // The cache file gsd-update-check.json is legitimate (different artifact);
-    // check that no hook registration uses the inverted .js filename.
-    // Match the exact pattern: quote + gsd-update-check.js + quote
+  test('Codex install no longer wires SessionStart update hooks into config.toml', () => {
+    const start = src.indexOf('// Add Codex hooks');
+    const end = src.indexOf('// Configure statusline and hooks in settings.json');
+    const codexHookBlock = start !== -1 && end !== -1 && end > start ? src.slice(start, end) : '';
+
     assert.ok(
-      !src.match(/['"]gsd-update-check\.js['"]/),
-      'install.js must not reference the inverted hook name gsd-update-check.js in quotes'
+      codexHookBlock.length === 0 || !codexHookBlock.includes('codex_hooks = true'),
+      'Codex config.toml block should not enable codex_hooks by default'
+    );
+    assert.ok(
+      codexHookBlock.length === 0 || !codexHookBlock.includes('event = "SessionStart"'),
+      'Codex config.toml block should not register a SessionStart hook'
+    );
+    assert.ok(
+      codexHookBlock.length === 0 || !codexHookBlock.includes('gsd-check-update.js'),
+      'Codex config.toml block should not reference gsd-check-update.js'
     );
   });
 
@@ -410,47 +419,19 @@ describe('uninstall settings cleanup preserves user hooks', () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('Codex legacy gsd-update-check migration', () => {
-  test('install.js strips legacy gsd-update-check hook blocks from config', () => {
+  test('install.js no longer contains the old Codex update-hook migration block', () => {
     const src = fs.readFileSync(INSTALL_SRC, 'utf-8');
     assert.ok(
-      src.includes('gsd-update-check') && src.includes('replace('),
-      'install.js should have migration logic to strip legacy gsd-update-check entries'
+      !src.includes('// Add Codex hooks'),
+      'install.js should not contain the old Codex config.toml migration block marker'
     );
-  });
-
-  test('migration regex removes LF legacy hook block', () => {
-    const legacyBlock = [
-      '[features]',
-      'codex_hooks = true',
-      '',
-      '# GSD Hooks',
-      '[[hooks]]',
-      'event = "SessionStart"',
-      'command = "node /old/path/gsd-update-check.js"',
-      '',
-    ].join('\n');
-
-    let content = legacyBlock;
-    content = content.replace(/\n# GSD Hooks\n\[\[hooks\]\]\nevent = "SessionStart"\ncommand = "node [^\n]*gsd-update-check\.js"\n/g, '\n');
-    assert.ok(!content.includes('gsd-update-check'), 'legacy hook block should be removed');
-    assert.ok(content.includes('[features]'), 'non-hook content should be preserved');
-  });
-
-  test('migration regex removes CRLF legacy hook block', () => {
-    const legacyBlock = [
-      '[features]',
-      'codex_hooks = true',
-      '',
-      '# GSD Hooks',
-      '[[hooks]]',
-      'event = "SessionStart"',
-      'command = "node /old/path/gsd-update-check.js"',
-      '',
-    ].join('\r\n');
-
-    let content = legacyBlock;
-    content = content.replace(/\r\n# GSD Hooks\r\n\[\[hooks\]\]\r\nevent = "SessionStart"\r\ncommand = "node [^\r\n]*gsd-update-check\.js"\r\n/g, '\r\n');
-    assert.ok(!content.includes('gsd-update-check'), 'legacy CRLF hook block should be removed');
-    assert.ok(content.includes('[features]'), 'non-hook content should be preserved');
+    assert.ok(
+      !src.includes('event = "SessionStart"'),
+      'install.js should not contain the old SessionStart migration block'
+    );
+    assert.ok(
+      src.includes('if (!hasGsdUpdateHook && fs.existsSync(checkUpdateFile)) {'),
+      'install.js should use the hardened update-hook registration guard'
+    );
   });
 });

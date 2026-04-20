@@ -723,7 +723,7 @@ Switch to budget profile: `/gsd-set-profile budget`. Disable research and plan-c
 
 ### Using Non-Claude Runtimes (Codex, OpenCode, Gemini CLI, Kilo)
 
-If you installed GSD for a non-Claude runtime, the installer already configured model resolution so all agents use the runtime's default model. No manual setup is needed. Specifically, the installer sets `resolve_model_ids: "omit"` in your config, which tells GSD to skip Anthropic model ID resolution and let the runtime choose its own default model.
+For a non-Claude runtime, set `resolve_model_ids: "omit"` in `~/.gsd/defaults.json` for a global default, or in `.planning/config.json` if you only want it for one project.
 
 To assign different models to different agents on a non-Claude runtime, add `model_overrides` to `.planning/config.json` with fully-qualified model IDs that your runtime recognizes:
 
@@ -738,7 +738,7 @@ To assign different models to different agents on a non-Claude runtime, add `mod
 }
 ```
 
-The installer auto-configures `resolve_model_ids: "omit"` for Gemini CLI, OpenCode, Kilo, and Codex. If you're manually setting up a non-Claude runtime, add it to `.planning/config.json` yourself.
+If you want the SDK CLI installed on PATH, pass `--sdk` to the installer; SDK install is skipped by default.
 
 See the [Configuration Reference](CONFIGURATION.md#non-claude-runtimes-codex-opencode-gemini-cli-kilo) for the full explanation.
 
@@ -993,4 +993,3 @@ For reference, here is what GSD creates in your project:
       XX-UI-REVIEW.md     # Visual audit scores (from /gsd-ui-review)
   ui-reviews/             # Screenshots from /gsd-ui-review (gitignored)
 ```
-

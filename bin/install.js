@@ -5947,9 +5947,7 @@ function install(isGlobal, runtime = 'claude') {
     console.log(`  ${green}✓${reset} Generated config.toml with ${agentCount} agent roles`);
     console.log(`  ${green}✓${reset} Generated ${agentCount} agent .toml config files`);
 
-    // Copy hook files that are referenced in config.toml (#2153)
-    // The main hook-copy block is gated to non-Codex runtimes, but Codex registers
-    // gsd-check-update.js in config.toml — the file must physically exist.
+    // Copy hook files that are referenced by agent prompts and scripts.
     const codexHooksSrc = path.join(src, 'hooks', 'dist');
     if (fs.existsSync(codexHooksSrc)) {
       const codexHooksDest = path.join(targetDir, 'hooks');
@@ -5979,39 +5977,6 @@ function install(isGlobal, runtime = 'claude') {
         }
       }
       console.log(`  ${green}✓${reset} Installed hooks`);
-    }
-
-    // Add Codex hooks (SessionStart for update checking) — requires codex_hooks feature flag
-    const configPath = path.join(targetDir, 'config.toml');
-    try {
-      let configContent = fs.existsSync(configPath) ? fs.readFileSync(configPath, 'utf-8') : '';
-      const eol = detectLineEnding(configContent);
-      const codexHooksFeature = ensureCodexHooksFeature(configContent);
-      configContent = setManagedCodexHooksOwnership(codexHooksFeature.content, codexHooksFeature.ownership);
-
-      // Add SessionStart hook for update checking
-      const updateCheckScript = path.resolve(targetDir, 'hooks', 'gsd-check-update.js').replace(/\\/g, '/');
-      const hookBlock =
-        `${eol}# GSD Hooks${eol}` +
-        `[[hooks]]${eol}` +
-        `event = "SessionStart"${eol}` +
-        `command = "node ${updateCheckScript}"${eol}`;
-
-      // Migrate legacy gsd-update-check entries from prior installs (#1755 followup)
-      // Remove stale hook blocks that used the inverted filename or wrong path
-      if (configContent.includes('gsd-update-check')) {
-        configContent = configContent.replace(/\n# GSD Hooks\n\[\[hooks\]\]\nevent = "SessionStart"\ncommand = "node [^\n]*gsd-update-check\.js"\n/g, '\n');
-        configContent = configContent.replace(/\r\n# GSD Hooks\r\n\[\[hooks\]\]\r\nevent = "SessionStart"\r\ncommand = "node [^\r\n]*gsd-update-check\.js"\r\n/g, '\r\n');
-      }
-
-      if (hasEnabledCodexHooksFeature(configContent) && !configContent.includes('gsd-check-update')) {
-        configContent += hookBlock;
-      }
-
-      fs.writeFileSync(configPath, configContent, 'utf-8');
-      console.log(`  ${green}✓${reset} Configured Codex hooks (SessionStart)`);
-    } catch (e) {
-      console.warn(`  ${yellow}⚠${reset}  Could not configure Codex hooks: ${e.message}`);
     }
 
     return { settingsPath: null, settings: null, statuslineCommand: null, runtime, configDir: targetDir };
@@ -6416,27 +6381,6 @@ function finishInstall(settingsPath, settings, statuslineCommand, shouldInstallS
     configureKiloPermissions(isGlobal, configDir);
   }
 
-  // For non-Claude runtimes, set resolve_model_ids: "omit" in ~/.gsd/defaults.json
-  // so resolveModelInternal() returns '' instead of Claude aliases (opus/sonnet/haiku)
-  // that the runtime can't resolve. Users can still use model_overrides for explicit IDs.
-  // See #1156.
-  if (runtime !== 'claude') {
-    const gsdDir = path.join(os.homedir(), '.gsd');
-    const defaultsPath = path.join(gsdDir, 'defaults.json');
-    try {
-      fs.mkdirSync(gsdDir, { recursive: true });
-      let defaults = {};
-      try { defaults = JSON.parse(fs.readFileSync(defaultsPath, 'utf8')); } catch { /* new file */ }
-      if (defaults.resolve_model_ids !== 'omit') {
-        defaults.resolve_model_ids = 'omit';
-        fs.writeFileSync(defaultsPath, JSON.stringify(defaults, null, 2) + '\n');
-        console.log(`  ${green}✓${reset} Set resolve_model_ids: "omit" in ~/.gsd/defaults.json`);
-      }
-    } catch (e) {
-      console.log(`  ${yellow}⚠${reset} Could not write ~/.gsd/defaults.json: ${e.message}`);
-    }
-  }
-
   let program = 'Claude Code';
   if (runtime === 'opencode') program = 'OpenCode';
   if (runtime === 'gemini') program = 'Gemini';
@@ -6751,16 +6695,19 @@ function installSdkIfNeeded() {
     return;
   }
 
+  if (!hasSdk) {
+    console.log(`\n  ${dim}Skipping GSD SDK install (default; use --sdk to enable)${reset}`);
+    return;
+  }
+
   const { spawnSync } = require('child_process');
   const path = require('path');
   const fs = require('fs');
 
-  if (!hasSdk) {
-    const resolved = resolveGsdSdk();
-    if (resolved) {
-      console.log(`  ${green}✓${reset} GSD SDK already installed (gsd-sdk on PATH at ${resolved})`);
-      return;
-    }
+  const resolved = resolveGsdSdk();
+  if (resolved) {
+    console.log(`  ${green}✓${reset} GSD SDK already installed (gsd-sdk on PATH at ${resolved})`);
+    return;
   }
 
   // Locate the in-repo sdk/ directory relative to this installer file.
@@ -6820,9 +6767,9 @@ function installSdkIfNeeded() {
   //    not always on the current shell's PATH (Homebrew prefixes, nvm setups,
   //    unconfigured npm prefix), so a zero exit status from `npm install -g`
   //    alone is not proof of a working binary (issue #2439 root cause).
-  const resolved = resolveGsdSdk();
-  if (resolved) {
-    console.log(`  ${green}✓${reset} Built and installed GSD SDK from source (gsd-sdk resolved at ${resolved})`);
+  const verifiedResolved = resolveGsdSdk();
+  if (verifiedResolved) {
+    console.log(`  ${green}✓${reset} Built and installed GSD SDK from source (gsd-sdk resolved at ${verifiedResolved})`);
     return;
   }
 
@@ -6859,9 +6806,8 @@ function installAllRuntimes(runtimes, isGlobal, isInteractive) {
     // so `gsd-sdk` lands on PATH. Every /gsd-* command shells out to
     // `gsd-sdk query …`; without this, commands fail with "command not found:
     // gsd-sdk". The npm-published @gsd-build/sdk is kept intentionally frozen
-    // at an older version; we always build from source so users get the SDK
-    // that matches the installed GSD version.
-    // Runs by default; skip with --no-sdk. Idempotent when already present.
+    // at an older version; we only build from source when the user opts in
+    // with --sdk, or when an explicit SDK install is being enforced.
     installSdkIfNeeded();
 
     const printSummaries = () => {

@@ -508,7 +508,7 @@ Valid override values: `opus`, `sonnet`, `haiku`, `inherit`, or any fully-qualif
 
 ### Non-Claude Runtimes (Codex, OpenCode, Gemini CLI, Kilo)
 
-When GSD is installed for a non-Claude runtime, the installer automatically sets `resolve_model_ids: "omit"` in `~/.gsd/defaults.json`. This causes GSD to return an empty model parameter for all agents, so each agent uses whatever model the runtime is configured with. No additional setup is needed for the default case.
+For a non-Claude runtime, set `resolve_model_ids: "omit"` in `~/.gsd/defaults.json` if you want GSD to return an empty model parameter for all agents so the runtime can supply its default model. No additional setup is needed for the default case.
 
 If you want different agents to use different models, use `model_overrides` with fully-qualified model IDs that your runtime recognizes:
 
@@ -530,7 +530,7 @@ The intent is the same as the Claude profile tiers -- use a stronger model for p
 
 | Scenario | Setting | Effect |
 |----------|---------|--------|
-| Non-Claude runtime, single model | `resolve_model_ids: "omit"` (installer default) | All agents use the runtime's default model |
+| Non-Claude runtime, single model | `resolve_model_ids: "omit"` | All agents use the runtime's default model |
 | Non-Claude runtime, tiered models | `resolve_model_ids: "omit"` + `model_overrides` | Named agents use specific models, others use runtime default |
 | Claude Code with OpenRouter/local provider | `model_profile: "inherit"` | All agents follow the session model |
 | Claude Code with OpenRouter, tiered | `model_profile: "inherit"` + `model_overrides` | Named agents use specific models, others inherit |

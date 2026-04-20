@@ -23,20 +23,8 @@ When you need library or framework documentation, check in this order:
    - Resolve library ID: `mcp__context7__resolve-library-id` with `libraryName`
    - Fetch docs: `mcp__context7__get-library-docs` with `context7CompatibleLibraryId` and `topic`
 
-2. If Context7 MCP is not available (upstream bug anthropics/claude-code#13898 strips MCP
-   tools from agents with a `tools:` frontmatter restriction), use the CLI fallback via Bash:
-
-   Step 1 — Resolve library ID:
-   ```bash
-   npx --yes ctx7@latest library <name> "<query>"
-   ```
-   Step 2 — Fetch documentation:
-   ```bash
-   npx --yes ctx7@latest docs <libraryId> "<query>"
-   ```
-
-Do not skip documentation lookups because MCP tools are unavailable — the CLI fallback
-works via Bash and produces equivalent output.
+2. If Context7 MCP is not available, use official docs or WebFetch/WebSearch instead. Do not
+   install or run any npm-based CLI fallback.
 </documentation_lookup>
 
 <required_reading>

@@ -51,7 +51,7 @@ Model profiles control which Claude model each GSD agent uses. This allows balan
 
 ## Using Non-Claude Runtimes (Codex, OpenCode, Gemini CLI, Kilo)
 
-When installed for a non-Claude runtime, the GSD installer sets `resolve_model_ids: "omit"` in `~/.gsd/defaults.json`. This returns an empty model parameter for all agents, so each agent uses the runtime's default model. No manual setup is needed.
+For a non-Claude runtime, set `resolve_model_ids: "omit"` in `~/.gsd/defaults.json` if you want GSD to return an empty model parameter for all agents so the runtime uses its default model. No manual setup is needed for that default behavior.
 
 To assign different models to different agents, add `model_overrides` with model IDs your runtime recognizes:
 

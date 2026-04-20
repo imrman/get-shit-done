@@ -568,7 +568,7 @@ Ten additional agents ship under `agents/gsd-*.md` and are used by specialty wor
 | **Produces** | Sections 3–4b of `AI-SPEC.md` (framework quick reference + implementation guidance) |
 
 **Key behaviors:**
-- Uses Context7 MCP when available; falls back to the `ctx7` CLI via Bash when MCP tools are stripped from the agent
+- Uses Context7 MCP when available
 - Anchors guidance to the specific use case, not generic framework overviews
 
 ---
