@@ -10,20 +10,31 @@ Use this procedure when `npx get-shit-done-cc@latest` is unavailable — e.g. du
 ## Steps
 
 ```bash
-# 1. Pull latest code
-git pull --rebase origin main
+# 1. Fetch both remotes and create or reuse a sync branch from the hardened branch
+git remote add upstream https://github.com/gsd-build/get-shit-done.git 2>/dev/null || true
+git fetch origin
+git fetch upstream
+git switch codex/harden-install-surface
+git switch -c sync/upstream-update || git switch sync/upstream-update
 
-# 2. Build the hooks dist (required — hooks/dist/ is generated, not checked in as source)
+# 2. Merge upstream/main into the sync branch and resolve any conflicts there
+git merge upstream/main
+
+# 3. Verify the sync branch before installing
+git diff --check
+node --test tests/hardening-install-surface.test.cjs tests/codex-config.test.cjs tests/install-hooks-copy.test.cjs
+
+# 4. Build the hooks dist (required because hooks/dist/ is generated)
 node scripts/build-hooks.js
 
-# 3. Run the installer directly
+# 5. Run the installer from the sync branch
 node bin/install.js --claude --global
 
-# 4. Clear the update cache so the statusline indicator resets
+# 6. Clear the update cache so the statusline indicator resets
 rm -f ~/.cache/gsd/gsd-update-check.json
 ```
 
-**Step 5 — Restart your runtime** to pick up the new commands and agents.
+Open or update a PR from `sync/upstream-update` into `codex/harden-install-surface`, then merge only after the verification above passes.
 
 ## Runtime flags
 
@@ -60,3 +71,4 @@ The installer performs a clean wipe-and-replace of GSD-managed directories only:
 - Custom hooks
 
 Locally modified GSD files are automatically backed up to `gsd-local-patches/` before the install. Run `/gsd-reapply-patches` after updating to merge your modifications back in.
+Never pull upstream directly into `codex/harden-install-surface`; always sync through a separate branch and PR.

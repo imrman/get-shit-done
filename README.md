@@ -120,6 +120,7 @@ The canonical discovery contract is documented in [docs/skills/discovery-contrac
 
 > [!TIP]
 > For source-based installs or environments where npm is unavailable, see **[docs/manual-update.md](docs/manual-update.md)**.
+> The secure install branch is `codex/harden-install-surface`; upstream updates are proposed through automation PRs, not by pulling directly on that branch.
 
 ### Staying Updated
 
@@ -128,6 +129,8 @@ GSD evolves fast. Update periodically:
 ```bash
 npx get-shit-done-cc@latest
 ```
+
+If you are using the secure install branch, keep updates on the automation PR path. Do not `git pull` directly on `codex/harden-install-surface`.
 
 <details>
 <summary><strong>Non-interactive Install (Docker, CI, Scripts)</strong></summary>
