@@ -1,4 +1,4 @@
-name: Upstream Sync
+name: Hardened Upstream Sync
 
 on:
   schedule:
@@ -11,7 +11,7 @@ permissions:
   issues: write
 
 concurrency:
-  group: upstream-sync
+  group: hardened-upstream-sync
   cancel-in-progress: false
 
 env:
