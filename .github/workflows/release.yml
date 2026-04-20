@@ -187,6 +187,9 @@ jobs:
           git add package.json package-lock.json
           git commit -m "chore: bump to ${PRE_VERSION}"
 
+      - name: Build SDK dist for tarball
+        run: npm run build:sdk
+
       - name: Dry-run publish validation
         run: npm publish --dry-run --tag next
         env:
@@ -308,6 +311,9 @@ jobs:
         run: |
           npm ci
           npm run test:coverage
+
+      - name: Build SDK dist for tarball
+        run: npm run build:sdk
 
       - name: Dry-run publish validation
         run: npm publish --dry-run

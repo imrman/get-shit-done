@@ -6,6 +6,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.38.2] - 2026-04-19
+
+### Fixed
+- **SDK decoupled from build-from-source install** — replaces the fragile `tsc` + `npm install -g ./sdk` dance on user machines with a prebuilt `sdk/dist/` shipped inside the parent `get-shit-done-cc` tarball. The `gsd-sdk` CLI is now a `bin/gsd-sdk.js` shim in the parent package that resolves `sdk/dist/cli.js` and invokes it via `node`, so npm chmods the bin entry from the tarball (not from a secondary local install) and PATH/exec-bit issues cannot occur. Deletes `installSdkIfNeeded()`, `resolveGsdSdk()`, `detectShellRc()`, `emitSdkFatal()` from `bin/install.js` (162 lines removed). `release.yml` now runs `npm run build:sdk` before publish in both rc and finalize jobs, so every published tarball contains fresh SDK dist. `sdk/package.json` `prepublishOnly` is the final safety net (`rm -rf dist && tsc && chmod +x dist/cli.js`). `install-smoke.yml` adds an `smoke-unpacked` variant that installs from the unpacked dir with the exec bit stripped, so this class of regression cannot ship again. Closes #2441 and #2453.
+- **`--sdk` flag semantics changed** — previously forced a rebuild of the SDK from source; now verifies the bundled `sdk/dist/` is resolvable. Users who were invoking `get-shit-done-cc --sdk` as a "force rebuild" no longer need it — the SDK ships prebuilt.
+
 ### Added
 - **`/gsd-ingest-docs` command** — Scan a repo containing mixed ADRs, PRDs, SPECs, and DOCs and bootstrap or merge the full `.planning/` setup from them in a single pass. Parallel classification (`gsd-doc-classifier`), synthesis with precedence rules and cycle detection (`gsd-doc-synthesizer`), three-bucket conflicts report (`INGEST-CONFLICTS.md`: auto-resolved, competing-variants, unresolved-blockers), and hard-block on LOCKED-vs-LOCKED ADR contradictions in both new and merge modes. Supports directory-convention discovery and `--manifest <file>` YAML override with per-doc precedence. v1 caps at 50 docs per invocation; `--resolve interactive` is reserved. Extracts shared conflict-detection contract into `references/doc-conflict-engine.md` which `/gsd-import` now also consumes (#2387)
 
