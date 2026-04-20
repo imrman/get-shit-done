@@ -5827,6 +5827,7 @@ function install(isGlobal, runtime = 'claude') {
             let content = fs.readFileSync(srcFile, 'utf8');
             content = content.replace(/'\.claude'/g, configDirReplacement);
             content = content.replace(/\/\.claude\//g, `/${getDirName(runtime)}/`);
+            content = content.replace(/\.claude\//g, `${getDirName(runtime)}/`);
             if (isQwen) {
               content = content.replace(/CLAUDE\.md/g, 'QWEN.md');
               content = content.replace(/\bClaude Code\b/g, 'Qwen Code');
@@ -5952,6 +5953,7 @@ function install(isGlobal, runtime = 'claude') {
           let content = fs.readFileSync(srcFile, 'utf8');
           content = content.replace(/'\.claude'/g, configDirReplacement);
           content = content.replace(/\/\.claude\//g, `/${getDirName(runtime)}/`);
+          content = content.replace(/\.claude\//g, `${getDirName(runtime)}/`);
           content = content.replace(/\{\{GSD_VERSION\}\}/g, pkg.version);
           fs.writeFileSync(destFile, content);
           try { fs.chmodSync(destFile, 0o755); } catch (e) { /* Windows */ }
