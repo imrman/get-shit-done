@@ -8,7 +8,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### SDK query layer — Phase 3 (what you get)
 
-If you use GSD **as a workflow**—milestones, phases, `.planning/` artifacts, bundled workflows, and `**/gsd:`** commands—Phase 3 is about **behavior matching what the docs and steps promise**, and **a bit less overhead** when the framework advances a phase or bootstraps a new project for you.
+If you use GSD **as a workflow**—milestones, phases, `.planning/` artifacts, bundled workflows, and **`/gsd:`** commands—Phase 3 is about **behavior matching what the docs and steps promise**, and **a bit less overhead** when the framework advances a phase or bootstraps a new project for you.
 
 - **Your workflow shouldn’t silently drift from the docs** — The actions that touch **STATE**, **ROADMAP**, git commits, config, and init/bootstrap are **continuously compared** to the legacy `gsd-tools.cjs` behavior in automated tests. The point for you: fewer “the workflow said X but the tooling did Y” moments as GSD ships updates (#2302).
 - **Snappier phase and new-project flows (typical path)** — When you’re **not** on a workstream override, the frequent “where is this phase?”, “what’s left to run?”, “mark phase complete”, and similar steps **avoid spawning a whole extra Node process every time**. Same outcomes you expect from the workflow; it should just feel **lighter** when things run headless or in tight loops (#2302).
@@ -92,37 +92,37 @@ If you use GSD **as a workflow**—milestones, phases, `.planning/` artifacts, b
 
 ### SDK query layer — Phases 1 & 2 (what you get)
 
-Day to day, GSD still revolves around **your planning tree** (ROADMAP, STATE, phase folders, config) and **following the workflow** (discuss → plan → execute → verify, milestone closes, etc.). Phases 1 and 2 introduce `**gsd-sdk query`** so those “plumbing” steps have a **supported, first-class CLI**—and so **what workflows and `/gsd:` docs tell you to paste** is closer to what actually runs.
+Day to day, GSD still revolves around **your planning tree** (ROADMAP, STATE, phase folders, config) and **following the workflow** (discuss → plan → execute → verify, milestone closes, etc.). Phases 1 and 2 introduce **`gsd-sdk query`** so those “plumbing” steps have a **supported, first-class CLI**—and so **what workflows and `/gsd:` docs tell you to paste** is closer to what actually runs.
 
-- **Phase 1 — Unblock faster when a step fails (#2118)** — The same kinds of checks and updates your **workflows, hooks, and agents** rely on—reading phase context, roadmap, STATE, init payloads, config, validation—can go through `**gsd-sdk query`**. When something is wrong (bad path, missing file, invalid args), you get **errors you can act on**, not an opaque script dump—so a stuck phase or a bad copy-paste is easier to fix, and **your own** terminal or CI glue beside GSD is easier to keep stable.
-- **Phase 2 — Trust the examples in workflows (#2122, #2008)** — The `**gsd-sdk query`** CLI **only runs commands that exist**—no accidental fallback to something else. **Workflow and agent examples** were updated to match. A few **special-case tools** (e.g. **graphify**, **from-gsd2**) still call the legacy binary until they’re brought onto the same path; `**docs/CLI-TOOLS.md`** and `**sdk/src/query/QUERY-HANDLERS.md**` list what’s in scope. Hardening (commits, locks, paths, argument parsing) mostly shows up as **fewer odd failures mid-milestone** when STATE, roadmap, and git steps run.
+- **Phase 1 — Unblock faster when a step fails (#2118)** — The same kinds of checks and updates your **workflows, hooks, and agents** rely on—reading phase context, roadmap, STATE, init payloads, config, validation—can go through **`gsd-sdk query`**. When something is wrong (bad path, missing file, invalid args), you get **errors you can act on**, not an opaque script dump—so a stuck phase or a bad copy-paste is easier to fix, and **your own** terminal or CI glue beside GSD is easier to keep stable.
+- **Phase 2 — Trust the examples in workflows (#2122, #2008)** — The **`gsd-sdk query`** CLI **only runs commands that exist**—no accidental fallback to something else. **Workflow and agent examples** were updated to match. A few **special-case tools** (e.g. **graphify**, **from-gsd2**) still call the legacy binary until they’re brought onto the same path; **`docs/CLI-TOOLS.md`** and **`sdk/src/query/QUERY-HANDLERS.md`** list what’s in scope. Hardening (commits, locks, paths, argument parsing) mostly shows up as **fewer odd failures mid-milestone** when STATE, roadmap, and git steps run.
 
 Technical implementation details for Phase 2 appear in the **Changed** section below.
 
 ### Added
 
-- `**/gsd-graphify` integration** — Knowledge graph for planning agents, enabling richer context connections between project artifacts (#2164)
-- `**gsd-pattern-mapper` agent** — Codebase pattern analysis agent for identifying recurring patterns and conventions (#1861)
-- `**@gsd-build/sdk` — Phase 1 typed query foundation (#2118)** — Introduces `**gsd-sdk query`** and registry-backed handlers; see **SDK query layer — Phases 1 & 2** above for how that fits the workflow.
+- **`/gsd-graphify` integration** — Knowledge graph for planning agents, enabling richer context connections between project artifacts (#2164)
+- **`gsd-pattern-mapper` agent** — Codebase pattern analysis agent for identifying recurring patterns and conventions (#1861)
+- **`@gsd-build/sdk` — Phase 1 typed query foundation (#2118)** — Introduces **`gsd-sdk query`** and registry-backed handlers; see **SDK query layer — Phases 1 & 2** above for how that fits the workflow.
 - **Opt-in TDD pipeline mode** — `tdd_mode` exposed in init JSON with `--tdd` flag override for test-driven development workflows (#2119, #2124)
 - **Stale/orphan worktree detection (W017)** — `validate-health` now detects stale and orphan worktrees (#2175)
 - **Seed scanning in new-milestone** — Planted seeds are scanned during milestone step 2.5 for automatic surfacing (#2177)
 - **Artifact audit gate** — Open artifact auditing for milestone close and phase verify (#2157, #2158, #2160)
-- `**/gsd-quick` and `/gsd-thread` subcommands** — Added list/status/resume/close subcommands (#2159)
+- **`/gsd-quick` and `/gsd-thread` subcommands** — Added list/status/resume/close subcommands (#2159)
 - **Debug skill dispatch and session manager** — Sub-orchestrator for `/gsd-debug` sessions (#2154)
 - **Project skills awareness** — 9 GSD agents now discover and use project-scoped skills (#2152)
-- `**/gsd-debug` session management** — TDD gate, reasoning checkpoint, and security hardening (#2146)
+- **`/gsd-debug` session management** — TDD gate, reasoning checkpoint, and security hardening (#2146)
 - **Context-window-aware prompt thinning** — Automatic prompt size reduction for sub-200K models (#1978)
 - **SDK `--ws` flag** — Workstream-aware execution support (#1884)
-- `**/gsd-extract-learnings` command** — Phase knowledge capture workflow (#1873)
+- **`/gsd-extract-learnings` command** — Phase knowledge capture workflow (#1873)
 - **Cross-AI execution hook** — Step 2.5 in execute-phase for external AI integration (#1875)
 - **Ship workflow external review hook** — External code review command hook in ship workflow
 - **Plan bounce hook** — Optional external refinement step (12.5) in plan-phase workflow
 - **Cursor CLI self-detection** — Cursor detection and REVIEWS.md template for `/gsd-review` (#1960)
 - **Architectural Responsibility Mapping** — Added to phase-researcher pipeline (#1988, #2103)
 - **Configurable `claude_md_path`** — Custom CLAUDE.md path setting (#2010, #2102)
-- `**/gsd-skill-manifest` command** — Pre-compute skill discovery for faster session starts (#2101)
-- `**--dry-run` mode and resolved blocker pruning** — State management improvements (#1970)
+- **`/gsd-skill-manifest` command** — Pre-compute skill discovery for faster session starts (#2101)
+- **`--dry-run` mode and resolved blocker pruning** — State management improvements (#1970)
 - **State prune command** — Prune unbounded section growth in STATE.md (#1970)
 - **Global skills support** — Support `~/.claude/skills/` in `agent_skills` config (#1992)
 - **Context exhaustion auto-recording** — Hooks auto-record session state on context exhaustion (#1974)
@@ -132,7 +132,7 @@ Technical implementation details for Phase 2 appear in the **Changed** section b
 ### Changed
 
 - **Planner context-cost sizing** — Replaced time-based reasoning with context-cost sizing and multi-source coverage audit (#2091, #2092, #2114)
-- `**/gsd-next` prior-phase completeness scan** — Replaced consecutive-call counter with completeness scan (#2097)
+- **`/gsd-next` prior-phase completeness scan** — Replaced consecutive-call counter with completeness scan (#2097)
 - **Inline execution for small plans** — Default to inline execution, skip subagent overhead for small plans (#1979)
 - **Prior-phase context optimization** — Limited to 3 most recent phases and includes `Depends on` phases (#1969)
 - **Non-technical owner adaptation** — `discuss-phase` adapts gray area language for non-technical owners via USER-PROFILE.md (#2125, #2173)
@@ -141,9 +141,9 @@ Technical implementation details for Phase 2 appear in the **Changed** section b
 - **Branch cleanup workflow** — Auto-delete on merge + weekly sweep (#2051)
 - **PR #2179 maintainer review (Trek-e)** — Scoped SDK to Phase 2 (#2122): removed `gsd-sdk query` passthrough to `gsd-tools.cjs` and `GSD_TOOLS_PATH` override; argv routing consolidated in `resolveQueryArgv()`. `GSDTools` JSON parsing now reports `@file:` indirection read failures instead of failing opaquely. `execute-plan.md` defers Task Commit Protocol to `agents/gsd-executor.md` (single source of truth). Stale `/gsd:` scan (#1748) skips `.planning/` and root `CLAUDE.md` so local gitignored overlays do not fail CI.
 - **SDK query registry (PR #2179 review)** — Register `summary-extract` as an alias of `summary.extract` so workflows/agents match CJS naming. Correct `audit-fix.md` to call `audit-uat` instead of nonexistent `init.audit-uat`.
-- `**gsd-tools audit-open`** — Use `core.output()` (was undefined `output()`), and pass the artifact object for `--json` so stdout is JSON (not double-stringified).
+- **`gsd-tools audit-open`** — Use `core.output()` (was undefined `output()`), and pass the artifact object for `--json` so stdout is JSON (not double-stringified).
 - **SDK query layer (PR review hardening)** — `commit-to-subrepo` uses realpath-aware path containment and sanitized commit messages; `state.planned-phase` uses the STATE.md lockfile; `verifyKeyLinks` mitigates ReDoS on frontmatter patterns; frontmatter handlers resolve paths under the real project root; phase directory names reject `..` and separators; `gsd-sdk` restores strict CLI parsing by stripping `--pick` before `parseArgs`; `QueryRegistry.commands()` for enumeration; `todoComplete` uses static error imports.
-- `**gsd-sdk query` routing (Phase 2 scope)** — `resolveQueryArgv()` maps argv to registered handlers (longest-prefix match on dotted and spaced command keys; optional single-token dotted split). Unregistered commands are rejected at the CLI; use `node …/gsd-tools.cjs` for CJS-only subcommands. `resolveGsdToolsPath()` probes the SDK-bundled copy, then project and user `~/.claude/get-shit-done/` installs (no `GSD_TOOLS_PATH` override). Broader “CLI parity” passthrough is explicitly out of scope for #2122 and tracked separately for a future approved issue.
+- **`gsd-sdk query` routing (Phase 2 scope)** — `resolveQueryArgv()` maps argv to registered handlers (longest-prefix match on dotted and spaced command keys; optional single-token dotted split). Unregistered commands are rejected at the CLI; use `node …/gsd-tools.cjs` for CJS-only subcommands. `resolveGsdToolsPath()` probes the SDK-bundled copy, then project and user `~/.claude/get-shit-done/` installs (no `GSD_TOOLS_PATH` override). Broader “CLI parity” passthrough is explicitly out of scope for #2122 and tracked separately for a future approved issue.
 - **SDK query follow-up (tests, docs, registry)** — Expanded `QUERY_MUTATION_COMMANDS` for event emission; stale lock cleanup uses PID liveness (`process.kill(pid, 0)`) when a lock file exists; `searchJsonEntries` is depth-bounded (`MAX_JSON_SEARCH_DEPTH`); removed unnecessary `readdirSync`/`Dirent` casts across query handlers; added `sdk/src/query/QUERY-HANDLERS.md` (error vs `{ data.error }`, mutations, locks, intel limits); unit tests for intel, profile, uat, skills, summary, websearch, workstream, registry vs `QUERY_MUTATION_COMMANDS`, and frontmatter extract/splice round-trip.
 - **Phase 2 caller migration (#2122)** — Workflows, agents, and commands prefer `gsd-sdk query` for registered handlers; extended migration to additional orchestration call sites (review, plan-phase, execute-plan, ship, extract_learnings, ai-integration-phase, eval-review, next, profile-user, autonomous, thread command) and researcher agents; dual-path and CJS-only exceptions documented in `docs/CLI-TOOLS.md` and `docs/ARCHITECTURE.md`; relaxed `tests/gsd-tools-path-refs.test.cjs` so `commands/gsd/workstreams.md` may document `gsd-sdk query` without `node` + `gsd-tools.cjs`. CJS `gsd-tools.cjs` remains on disk; graphify and other non-registry commands stay on CJS until registered. (#2008)
 - **Phase 2 docs and call sites (follow-up)** — `docs/USER-GUIDE.md` now explains `gsd-sdk query` vs legacy CJS and lists CJS-only commands (`state validate`/`sync`, `audit-open`, `graphify`, `from-gsd2`). Updated `commands/gsd` (`debug`, `quick`, `intel`), `agents/gsd-debug-session-manager.md`, and workflows (`milestone-summary`, `forensics`, `next`, `complete-milestone`, `verify-work`, `discuss-phase`, `progress`, `verify-phase`, `add-phase`/`insert-phase`/`remove-phase`, `transition`, `manager`, `quick`) for `gsd-sdk query` or explicit CJS exceptions (`audit-open`).
@@ -188,9 +188,9 @@ Technical implementation details for Phase 2 appear in the **Changed** section b
 - **Cline runtime support** — First-class Cline runtime via rules-based integration. Installs to `~/.cline/` or `./.cline/` as `.clinerules`. No custom slash commands — uses rules. `--cline` flag. (#1605 follow-up)
 - **CodeBuddy runtime support** — Skills-based install to `~/.codebuddy/skills/gsd-*/SKILL.md`. `--codebuddy` flag.
 - **Qwen Code runtime support** — Skills-based install to `~/.qwen/skills/gsd-*/SKILL.md`, same open standard as Claude Code 2.1.88+. `QWEN_CONFIG_DIR` env var for custom paths. `--qwen` flag.
-- `**/gsd-from-gsd2` command** (`gsd:from-gsd2`) — Reverse migration from GSD-2 format (`.gsd/` with Milestone→Slice→Task hierarchy) back to v1 `.planning/` format. Flags: `--dry-run` (preview only), `--force` (overwrite existing `.planning/`), `--path <dir>` (specify GSD-2 root). Produces `PROJECT.md`, `REQUIREMENTS.md`, `ROADMAP.md`, `STATE.md`, and sequential phase dirs. Flattens Milestone→Slice hierarchy to sequential phase numbers (M001/S01→phase 01, M001/S02→phase 02, M002/S01→phase 03, etc.).
-- `**/gsd-ai-integration-phase` command** (`gsd:ai-integration-phase`) — AI framework selection wizard for integrating AI/LLM capabilities into a project phase. Interactive decision matrix with domain-specific failure modes and eval criteria. Produces `AI-SPEC.md` with framework recommendation, implementation guidance, and evaluation strategy. Runs 3 parallel specialist agents: domain-researcher, framework-selector, ai-researcher, eval-planner.
-- `**/gsd-eval-review` command** (`gsd:eval-review`) — Retroactive audit of an implemented AI phase's evaluation coverage. Checks implementation against `AI-SPEC.md` evaluation plan. Scores each eval dimension as COVERED/PARTIAL/MISSING. Produces `EVAL-REVIEW.md` with findings, gaps, and remediation guidance.
+- **`/gsd-from-gsd2` command** (`gsd:from-gsd2`) — Reverse migration from GSD-2 format (`.gsd/` with Milestone→Slice→Task hierarchy) back to v1 `.planning/` format. Flags: `--dry-run` (preview only), `--force` (overwrite existing `.planning/`), `--path <dir>` (specify GSD-2 root). Produces `PROJECT.md`, `REQUIREMENTS.md`, `ROADMAP.md`, `STATE.md`, and sequential phase dirs. Flattens Milestone→Slice hierarchy to sequential phase numbers (M001/S01→phase 01, M001/S02→phase 02, M002/S01→phase 03, etc.).
+- **`/gsd-ai-integration-phase` command** (`gsd:ai-integration-phase`) — AI framework selection wizard for integrating AI/LLM capabilities into a project phase. Interactive decision matrix with domain-specific failure modes and eval criteria. Produces `AI-SPEC.md` with framework recommendation, implementation guidance, and evaluation strategy. Runs 3 parallel specialist agents: domain-researcher, framework-selector, ai-researcher, eval-planner.
+- **`/gsd-eval-review` command** (`gsd:eval-review`) — Retroactive audit of an implemented AI phase's evaluation coverage. Checks implementation against `AI-SPEC.md` evaluation plan. Scores each eval dimension as COVERED/PARTIAL/MISSING. Produces `EVAL-REVIEW.md` with findings, gaps, and remediation guidance.
 - **Review model configuration** — Per-CLI model selection for /gsd-review via `review.models.<cli>` config keys. Falls back to CLI defaults when not set. (#1849)
 - **Statusline now surfaces GSD milestone/phase/status** — when no `in_progress` todo is active, `gsd-statusline.js` reads `.planning/STATE.md` (walking up from the workspace dir) and fills the middle slot with `<milestone> · <status> · <phase> (N/total)`. Gracefully degrades when fields are missing; identical to previous behavior when there is no STATE.md or an active todo wins the slot. Uses the YAML frontmatter added for #628.
 - **Qwen Code and Cursor CLI peer reviewers** — Added as reviewers in `/gsd-review` with `--qwen` and `--cursor` flags. (#1966)
@@ -204,15 +204,15 @@ Technical implementation details for Phase 2 appear in the **Changed** section b
 ### Fixed
 
 - **Context7 MCP CLI fallback** — Handles `tools: []` response that previously broke Context7 availability detection. (#1885)
-- `**Agent` tool in gsd-autonomous** — Added `Agent` to `allowed-tools` to unblock subagent spawning. (#2043)
-- `**intel.enabled` in config-set whitelist** — Config key now accepted by `config-set` without validation error. (#2021)
-- `**writeSettings` null guard** — Guards against null `settingsPath` for Cline runtime to prevent crash on install. (#2046)
+- **`Agent` tool in gsd-autonomous** — Added `Agent` to `allowed-tools` to unblock subagent spawning. (#2043)
+- **`intel.enabled` in config-set whitelist** — Config key now accepted by `config-set` without validation error. (#2021)
+- **`writeSettings` null guard** — Guards against null `settingsPath` for Cline runtime to prevent crash on install. (#2046)
 - **Shell hook absolute paths** — `.sh` hooks now receive absolute quoted paths in `buildHookCommand`, fixing path resolution in non-standard working directories. (#2045)
-- `**processAttribution` runtime-aware** — Was hardcoded to `'claude'`; now reads actual runtime from environment.
-- `**AskUserQuestion` plain-text fallback** — Non-Claude runtimes now receive plain-text numbered lists instead of broken TUI menus.
+- **`processAttribution` runtime-aware** — Was hardcoded to `'claude'`; now reads actual runtime from environment.
+- **`AskUserQuestion` plain-text fallback** — Non-Claude runtimes now receive plain-text numbered lists instead of broken TUI menus.
 - **iOS app scaffold uses XcodeGen** — Prevents SPM execution errors in generated iOS scaffolds. (#2023)
-- `**acceptance_criteria` hard gate** — Enforced as a hard gate in executor — plans missing acceptance criteria are rejected before execution begins. (#1958)
-- `**normalizePhaseName` preserves letter suffix case** — Phase names with letter suffixes (e.g., `1a`, `2B`) now preserve original case. (#1963)
+- **`acceptance_criteria` hard gate** — Enforced as a hard gate in executor — plans missing acceptance criteria are rejected before execution begins. (#1958)
+- **`normalizePhaseName` preserves letter suffix case** — Phase names with letter suffixes (e.g., `1a`, `2B`) now preserve original case. (#1963)
 
 ## [1.34.2](https://github.com/gsd-build/get-shit-done/releases/tag/v1.34.2) - 2026-04-06
 
@@ -284,14 +284,14 @@ Technical implementation details for Phase 2 appear in the **Changed** section b
 - **Kilo CLI runtime support** — Full Kilo runtime integration with skill conversion and config management
 - **Augment Code runtime support** — Full Augment runtime with skill conversion
 - **Cline runtime support** — Install GSD for Cline via `.clinerules` (#1605)
-- `**state validate` command** — Detects drift between STATE.md and filesystem reality (#1627)
-- `**state sync` command** — Reconstructs STATE.md from actual project state with `--verify` dry-run (#1627)
-- `**state planned-phase` command** — Records state transition after plan-phase completes (#1627)
-- `**--to N` flag for autonomous mode** — Stop execution after completing a specific phase (#1644)
-- `**--power` flag for discuss-phase** — File-based bulk question answering (#1513)
-- `**--interactive` flag for autonomous** — Lean context with user input
-- `**--diagnose` flag for debug** — Diagnosis-only mode without fix attempts (#1396)
-- `**/gsd-analyze-dependencies` command** — Detect phase dependencies (#1607)
+- **`state validate` command** — Detects drift between STATE.md and filesystem reality (#1627)
+- **`state sync` command** — Reconstructs STATE.md from actual project state with `--verify` dry-run (#1627)
+- **`state planned-phase` command** — Records state transition after plan-phase completes (#1627)
+- **`--to N` flag for autonomous mode** — Stop execution after completing a specific phase (#1644)
+- **`--power` flag for discuss-phase** — File-based bulk question answering (#1513)
+- **`--interactive` flag for autonomous** — Lean context with user input
+- **`--diagnose` flag for debug** — Diagnosis-only mode without fix attempts (#1396)
+- **`/gsd-analyze-dependencies` command** — Detect phase dependencies (#1607)
 - **Anti-pattern severity levels** — Mandatory understanding checks at resume (#1491)
 - **Methodology artifact type** — Consumption mechanisms for methodology documents (#1488)
 - **Planner reachability check** — Validates plan steps are achievable (#1606)
@@ -349,22 +349,22 @@ Technical implementation details for Phase 2 appear in the **Changed** section b
 ### Added
 
 - **Claude Code 2.1.88+ skills migration** — Commands now install as `skills/gsd-*/SKILL.md` instead of deprecated `commands/gsd/`. Auto-cleans legacy directory on install
-- `**/gsd:docs-update` command** — Verified documentation generation with doc-writer and doc-verifier agents
-- `**--chain` flag for discuss-phase** — Interactive discuss that auto-chains into plan+execute
-- `**--only N` flag for autonomous** — Execute a single phase instead of all remaining
+- **`/gsd:docs-update` command** — Verified documentation generation with doc-writer and doc-verifier agents
+- **`--chain` flag for discuss-phase** — Interactive discuss that auto-chains into plan+execute
+- **`--only N` flag for autonomous** — Execute a single phase instead of all remaining
 - **Schema drift detection** — Prevents false-positive verification when ORM schema files change without migration
-- `**/gsd:secure-phase` command** — Security enforcement layer with threat-model-anchored verification
+- **`/gsd:secure-phase` command** — Security enforcement layer with threat-model-anchored verification
 - **Claim provenance tagging** — Researcher marks claims with source evidence
 - **Scope reduction detection** — Planner blocked from silently dropping requirements
-- `**workflow.use_worktrees` config** — Toggle to disable worktree isolation
-- `**project_code` config** — Prefix phase directories with project code
+- **`workflow.use_worktrees` config** — Toggle to disable worktree isolation
+- **`project_code` config** — Prefix phase directories with project code
 - **Project skills discovery** — CLAUDE.md generation now includes project-specific skills section
 - **CodeRabbit integration** — Added to cross-AI review workflow
 - **GSD SDK enhancements** — Auto `--init` flag, headless prompts, prompt sanitizer
 
 ### Changed
 
-- `**/gsd:quick --full` flag** — Now enables all phases (discussion + research + plan-checking + verification). New `--validate` flag covers previous `--full` behavior (plan-checking + verification only)
+- **`/gsd:quick --full` flag** — Now enables all phases (discussion + research + plan-checking + verification). New `--validate` flag covers previous `--full` behavior (plan-checking + verification only)
 
 ### Fixed
 
@@ -395,7 +395,7 @@ Technical implementation details for Phase 2 appear in the **Changed** section b
 ### Added
 
 - **GSD SDK** — Headless TypeScript SDK (`@gsd-build/sdk`) with `gsd-sdk init` and `gsd-sdk auto` CLI commands for autonomous project execution
-- `**--sdk` installer flag** — Optionally install the GSD SDK during setup (interactive prompt or `--sdk` flag)
+- **`--sdk` installer flag** — Optionally install the GSD SDK during setup (interactive prompt or `--sdk` flag)
 
 ## [1.29.0](https://github.com/gsd-build/get-shit-done/releases/tag/v1.29.0) - 2026-03-25
 
@@ -437,17 +437,17 @@ Technical implementation details for Phase 2 appear in the **Changed** section b
 
 - **Workstream namespacing** — Parallel milestone work via `/gsd:workstreams`
 - **Multi-project workspace commands** — Manage multiple GSD projects from a single root
-- `**/gsd:forensics` command** — Post-mortem workflow investigation
-- `**/gsd:milestone-summary` command** — Post-build onboarding for completed milestones
-- `**workflow.skip_discuss` setting** — Bypass discuss-phase in autonomous mode
-- `**workflow.discuss_mode` assumptions config** — Control discuss-phase behavior
+- **`/gsd:forensics` command** — Post-mortem workflow investigation
+- **`/gsd:milestone-summary` command** — Post-build onboarding for completed milestones
+- **`workflow.skip_discuss` setting** — Bypass discuss-phase in autonomous mode
+- **`workflow.discuss_mode` assumptions config** — Control discuss-phase behavior
 - **UI-phase recommendation** — Automatically surfaced for UI-heavy phases
 - **CLAUDE.md compliance** — Added as plan-checker Dimension 10
 - **Data-flow tracing, environment audit, and behavioral spot-checks** in verification
 - **Multi-runtime selection** in interactive installer
 - **Text mode support** for plan-phase workflow
 - **"Follow the Indirection" debugging technique** in gsd-debugger
-- `**--reviews` flag** for `gsd:plan-phase`
+- **`--reviews` flag** for `gsd:plan-phase`
 - **Temp file reaper** — Prevents unbounded /tmp accumulation
 
 ### Changed
@@ -481,13 +481,13 @@ Technical implementation details for Phase 2 appear in the **Changed** section b
 - **Advisor mode** — Research-backed discussion with parallel agents evaluating gray areas before you decide
 - **Multi-repo workspace support** — Auto-detection and project root resolution for monorepos and multi-repo setups
 - **Cursor CLI runtime support** — Full installation and command conversion for Cursor
-- `**/gsd:fast` command** — Trivial inline tasks that skip planning entirely
-- `**/gsd:review` command** — Cross-AI peer review of current phase or branch
-- `**/gsd:plant-seed` command** — Backlog parking lot for ideas and persistent context threads
-- `**/gsd:pr-branch` command** — Clean PR branches filtering `.planning/` commits
-- `**/gsd:audit-uat` command** — Verification debt tracking across phases
-- `**--analyze` flag for discuss-phase** — Trade-off analysis during discussion
-- `**research_before_questions` config option** — Run research before discussion questions instead of after
+- **`/gsd:fast` command** — Trivial inline tasks that skip planning entirely
+- **`/gsd:review` command** — Cross-AI peer review of current phase or branch
+- **`/gsd:plant-seed` command** — Backlog parking lot for ideas and persistent context threads
+- **`/gsd:pr-branch` command** — Clean PR branches filtering `.planning/` commits
+- **`/gsd:audit-uat` command** — Verification debt tracking across phases
+- **`--analyze` flag for discuss-phase** — Trade-off analysis during discussion
+- **`research_before_questions` config option** — Run research before discussion questions instead of after
 - **Ticket-based phase identifiers** — Support for team workflows using ticket IDs
 - **Worktree-aware `.planning/` resolution** — File locking for safe parallel access
 - **Discussion audit trail** — Auto-generated `DISCUSSION-LOG.md` during discuss-phase
@@ -534,8 +534,8 @@ Technical implementation details for Phase 2 appear in the **Changed** section b
 ### Added
 
 - **Developer profiling pipeline** — `/gsd:profile-user` analyzes Claude Code session history to build behavioral profiles across 8 dimensions (communication, decisions, debugging, UX, vendor choices, frustrations, learning style, explanation depth). Generates `USER-PROFILE.md`, `/gsd:dev-preferences`, and `CLAUDE.md` profile section. Includes `--questionnaire` fallback and `--refresh` for re-analysis (#1084)
-- `**/gsd:ship` command** — PR creation from verified phase work. Auto-generates rich PR body from planning artifacts, pushes branch, creates PR via `gh`, and updates STATE.md (#829)
-- `**/gsd:next` command** — Automatic workflow advancement to the next logical step (#927)
+- **`/gsd:ship` command** — PR creation from verified phase work. Auto-generates rich PR body from planning artifacts, pushes branch, creates PR via `gh`, and updates STATE.md (#829)
+- **`/gsd:next` command** — Automatic workflow advancement to the next logical step (#927)
 - **Cross-phase regression gate** — Execute-phase runs prior phases' test suites after execution, catching regressions before they compound (#945)
 - **Requirements coverage gate** — Plan-phase verifies all phase requirements are covered by at least one plan before proceeding (#984)
 - **Structured session handoff artifact** — `/gsd:pause-work` writes `.planning/HANDOFF.json` for machine-readable cross-session continuity (#940)
@@ -546,7 +546,7 @@ Technical implementation details for Phase 2 appear in the **Changed** section b
 - **Model alias-to-full-ID resolution** — Task API compatibility for model alias strings (#991)
 - **Execution hardening** — Pre-wave dependency checks, cross-plan data contracts, and export-level spot checks (#1082)
 - **Markdown normalization** — Generated markdown conforms to markdownlint standards (#1112)
-- `**/gsd:audit-uat` command** — Cross-phase audit of all outstanding UAT and verification items. Scans every phase for pending, skipped, blocked, and human_needed items. Cross-references against codebase to detect stale documentation. Produces prioritized human test plan grouped by testability
+- **`/gsd:audit-uat` command** — Cross-phase audit of all outstanding UAT and verification items. Scans every phase for pending, skipped, blocked, and human_needed items. Cross-references against codebase to detect stale documentation. Produces prioritized human test plan grouped by testability
 - **Verification debt tracking** — Five structural improvements to prevent silent loss of UAT/verification items when projects advance:
   - Cross-phase health check in `/gsd:progress` (Step 1.6) surfaces outstanding items from ALL prior phases
   - `status: partial` in UAT files distinguishes incomplete testing from completed sessions
@@ -584,8 +584,8 @@ Technical implementation details for Phase 2 appear in the **Changed** section b
 ### Added
 
 - **Antigravity runtime support** — Full installation support for the Antigravity AI agent runtime (`--antigravity`), alongside Claude Code, OpenCode, Gemini, Codex, and Copilot
-- `**/gsd:do` command** — Freeform text router that dispatches natural language to the right GSD command
-- `**/gsd:note` command** — Zero-friction idea capture with append, list, and promote-to-todo subcommands
+- **`/gsd:do` command** — Freeform text router that dispatches natural language to the right GSD command
+- **`/gsd:note` command** — Zero-friction idea capture with append, list, and promote-to-todo subcommands
 - **Context window warning toggle** — Config option to disable context monitor warnings (`hooks.context_monitor: false`)
 - **Comprehensive documentation** — New `docs/` directory with feature, architecture, agent, command, CLI, and configuration guides
 
@@ -611,8 +611,8 @@ Technical implementation details for Phase 2 appear in the **Changed** section b
 
 ### Added
 
-- `**/gsd:quick --research` flag** — Spawns focused research agent before planning, composable with `--discuss` and `--full` (#317)
-- `**inherit` model profile** for OpenCode — agents inherit the user's selected runtime model via `/model`
+- **`/gsd:quick --research` flag** — Spawns focused research agent before planning, composable with `--discuss` and `--full` (#317)
+- **`inherit` model profile** for OpenCode — agents inherit the user's selected runtime model via `/model`
 - **Persistent debug knowledge base** — resolved debug sessions append to `.planning/debug/knowledge-base.md`, eliminating cold-start investigation on recurring issues
 - **Programmatic `/gsd:set-profile`** — runs as a script instead of LLM-driven workflow, executes in seconds instead of 30-40s
 
@@ -632,7 +632,7 @@ Technical implementation details for Phase 2 appear in the **Changed** section b
 - `/gsd:ui-phase` + `/gsd:ui-review` — UI design contract generation and retroactive 6-pillar visual audit for frontend phases (closes #986)
 - `/gsd:stats` — project statistics dashboard: phases, plans, requirements, git metrics, and timeline
 - **Copilot CLI** runtime support — install with `--copilot`, maps Claude Code tools to GitHub Copilot tools
-- `**gsd-autonomous` skill** for Codex runtime — enables autonomous GSD execution
+- **`gsd-autonomous` skill** for Codex runtime — enables autonomous GSD execution
 - **Node repair operator** — autonomous recovery when task verification fails: RETRY, DECOMPOSE, or PRUNE before escalating to user. Configurable via `workflow.node_repair_budget` (default: 2 attempts). Disable with `workflow.node_repair: false`
 - Mandatory `read_first` and `acceptance_criteria` sections in plans to prevent shallow execution
 - Mandatory `canonical_refs` section in CONTEXT.md for traceable decisions
