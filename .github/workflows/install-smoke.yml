@@ -1,7 +1,11 @@
 name: Install Smoke
 
 # Exercises the real install path: `npm pack` → `npm install -g <tarball>`
-# → run `bin/install.js` → assert `gsd-sdk` is on PATH.
+# → run `bin/install.js` on the default path.
+#
+# SDK install is opt-in in the hardened fork, so the smoke test validates the
+# default path first and then explicitly exercises `--sdk` instead of assuming
+# `gsd-sdk` appears after a default install.
 #
 # Closes the CI gap that let #2439 ship: the rest of the suite only reads
 # `bin/install.js` as a string and never executes it.
@@ -111,7 +115,7 @@ jobs:
           echo "$NPM_BIN" >> "$GITHUB_PATH"
           echo "npm global bin: $NPM_BIN"
 
-      - name: Install tarball globally (runs bin/install.js → installSdkIfNeeded)
+      - name: Install tarball globally (default install path)
         if: steps.skip.outputs.skip != 'true'
         shell: bash
         env:
@@ -127,23 +131,18 @@ jobs:
           # install.js main block: when both a runtime and location are set,
           # installAllRuntimes runs with isInteractive=false, no prompts).
           # We tolerate non-zero here because the authoritative assertion is
-          # the next step: gsd-sdk must land on PATH. Some runtime targets
-          # may exit before the SDK step for unrelated reasons on CI.
+          # the next step: the core CLI must land on PATH. Some runtime
+          # targets may exit before later checks for unrelated reasons on CI.
           get-shit-done-cc --claude --local || true
 
-      - name: Assert gsd-sdk resolves on PATH
+      - name: Exercise opt-in SDK install path
         if: steps.skip.outputs.skip != 'true'
         shell: bash
         run: |
           set -euo pipefail
-          if ! command -v gsd-sdk >/dev/null 2>&1; then
-            echo "::error::gsd-sdk is not on PATH after install — installSdkIfNeeded() regression"
-            NPM_BIN="$(npm config get prefix)/bin"
-            echo "npm global bin: $NPM_BIN"
-            ls -la "$NPM_BIN" | grep -i gsd || true
-            exit 1
-          fi
-          echo "✓ gsd-sdk resolves at: $(command -v gsd-sdk)"
+          get-shit-done-cc --claude --local --sdk
+          GSDSDK_PATH="$(command -v gsd-sdk)"
+          echo "✓ gsd-sdk resolves at: $GSDSDK_PATH"
 
       - name: Assert gsd-sdk is executable
         if: steps.skip.outputs.skip != 'true'
