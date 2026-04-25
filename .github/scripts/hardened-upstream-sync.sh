@@ -12,7 +12,35 @@ upstream_sha="$(git rev-parse "upstream/$UPSTREAM_REF")"
 
 find_open_issue_number() {
   local title="$1"
-  gh issue list --state open --search "\"$title\" in:title" --json number,title --jq "map(select(.title == \"$title\")) | .[0].number // empty"
+  if ! gh issue list --state open --search "\"$title\" in:title" --json number,title --jq "map(select(.title == \"$title\")) | .[0].number // empty"; then
+    echo "Warning: unable to list GitHub issues; continuing without issue linkage." >&2
+  fi
+}
+
+upsert_issue_best_effort() {
+  local title="$1"
+  local body="$2"
+  local issue_number=""
+
+  issue_number="$(find_open_issue_number "$title")"
+  if [ -n "$issue_number" ]; then
+    if ! gh issue edit "$issue_number" --body "$body"; then
+      echo "Warning: unable to update GitHub issue #${issue_number}; continuing." >&2
+    fi
+    printf '%s' "$issue_number"
+    return 0
+  fi
+
+  if ! gh issue create --title "$title" --body "$body" >/dev/null; then
+    echo "Warning: unable to create GitHub issue; continuing without issue linkage." >&2
+    return 0
+  fi
+
+  find_open_issue_number "$title"
+}
+
+cleanup_merge_state() {
+  git merge --abort >/dev/null 2>&1 || git reset --hard "$before_sha" >/dev/null 2>&1 || true
 }
 
 exclude_workflow_file_changes() {
@@ -40,8 +68,12 @@ exclude_workflow_file_changes() {
 }
 
 if ! git merge --no-ff --no-edit "upstream/$UPSTREAM_REF"; then
+  if ! git rev-parse -q --verify MERGE_HEAD >/dev/null 2>&1 && [ -z "$(git ls-files -u)" ]; then
+    echo "Upstream merge failed for a non-conflict reason." >&2
+    exit 1
+  fi
+
   issue_title="Upstream sync conflict: ${UPSTREAM_REF} -> ${BASE_BRANCH}"
-  issue_number="$(find_open_issue_number "$issue_title")"
   issue_body=$(cat <<EOF
 Automated upstream sync could not merge \`upstream/${UPSTREAM_REF}\` into \`${BASE_BRANCH}\`.
 
@@ -52,12 +84,10 @@ Resolve the merge conflict manually, then push an updated sync branch PR back in
 EOF
 )
 
-  if [ -n "$issue_number" ]; then
-    gh issue edit "$issue_number" --body "$issue_body"
-  else
-    gh issue create --title "$issue_title" --body "$issue_body"
-  fi
-  exit 1
+  upsert_issue_best_effort "$issue_title" "$issue_body" >/dev/null
+  cleanup_merge_state
+  echo "Merge conflict encountered; cleaned up merge state."
+  exit 0
 fi
 
 exclude_workflow_file_changes
@@ -87,13 +117,7 @@ The linked PR must pass the hardened branch checks before merge.
 EOF
 )
 
-issue_number="$(find_open_issue_number "$issue_title")"
-if [ -n "$issue_number" ]; then
-  gh issue edit "$issue_number" --body "$issue_body"
-else
-  gh issue create --title "$issue_title" --body "$issue_body" >/dev/null
-  issue_number="$(find_open_issue_number "$issue_title")"
-fi
+issue_number="$(upsert_issue_best_effort "$issue_title" "$issue_body")"
 
 pr_title="chore: sync upstream/${UPSTREAM_REF} into ${BASE_BRANCH}"
 pr_body=$(cat <<EOF
@@ -102,10 +126,14 @@ Automated upstream sync PR.
 - Base branch: \`${BASE_BRANCH}\`
 - Candidate branch: \`${SYNC_BRANCH}\`
 - Upstream commit: \`${upstream_sha}\`
-
-Closes #${issue_number}
 EOF
 )
+
+if [ -n "$issue_number" ]; then
+  pr_body="${pr_body}
+
+Closes #${issue_number}"
+fi
 
 existing_pr="$(gh pr list --state open --base "$BASE_BRANCH" --head "$SYNC_BRANCH" --json number --jq '.[0].number // empty')"
 if [ -n "$existing_pr" ]; then

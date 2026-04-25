@@ -69,23 +69,102 @@ function cloneRepo(source, targetDir) {
   return targetDir;
 }
 
-function installGhStub(binDir) {
+function installGhStub(binDir, options = {}) {
   const ghPath = path.join(binDir, 'gh');
+  const prCreateBodyPath = path.join(binDir, 'gh-pr-create-body.txt');
+  const prCreateBodyBashPath = toBashPath(prCreateBodyPath);
+  const defaults = {
+    issueCreateStatus: 0,
+    issueCreateStderr: '',
+    issueCreateStdout: '',
+    issueEditStatus: 0,
+    issueEditStderr: '',
+    issueEditStdout: '',
+    issueListStatus: 0,
+    issueListStderr: '',
+    issueListStdout: '',
+    prCreateStatus: 0,
+    prCreateStderr: '',
+    prCreateStdout: '',
+    prEditStatus: 0,
+    prEditStderr: '',
+    prEditStdout: '',
+    prListStatus: 0,
+    prListStderr: '',
+    prListStdout: '',
+    prReadyStatus: 0,
+    prReadyStderr: '',
+    prReadyStdout: '',
+    prViewStatus: 0,
+    prViewStderr: '',
+    prViewStdout: 'false',
+  };
+  const config = { ...defaults, ...options };
   fs.mkdirSync(binDir, { recursive: true });
   fs.writeFileSync(
     ghPath,
     `#!/usr/bin/env bash
 set -euo pipefail
+pr_create_body_path=${shQuote(prCreateBodyBashPath)}
+
+write_output() {
+  local stdout_content="$1"
+  local stderr_content="$2"
+  local status_code="$3"
+
+  if [ -n "$stdout_content" ]; then
+    printf '%s' "$stdout_content"
+  fi
+
+  if [ -n "$stderr_content" ]; then
+    printf '%s\\n' "$stderr_content" >&2
+  fi
+
+  exit "$status_code"
+}
+
+find_arg_value() {
+  local flag="$1"
+  shift
+
+  while [ "$#" -gt 0 ]; do
+    if [ "$1" = "$flag" ] && [ "$#" -ge 2 ]; then
+      printf '%s' "$2"
+      return 0
+    fi
+    shift
+  done
+
+  return 1
+}
+
 case "$1 $2" in
   "issue list")
-    exit 0
+    write_output ${shQuote(config.issueListStdout)} ${shQuote(config.issueListStderr)} ${config.issueListStatus}
+    ;;
+  "issue create")
+    write_output ${shQuote(config.issueCreateStdout)} ${shQuote(config.issueCreateStderr)} ${config.issueCreateStatus}
+    ;;
+  "issue edit")
+    write_output ${shQuote(config.issueEditStdout)} ${shQuote(config.issueEditStderr)} ${config.issueEditStatus}
     ;;
   "pr list")
-    exit 0
+    write_output ${shQuote(config.prListStdout)} ${shQuote(config.prListStderr)} ${config.prListStatus}
+    ;;
+  "pr create")
+    if body="$(find_arg_value --body "$@" 2>/dev/null)"; then
+      printf '%s' "$body" > "$pr_create_body_path"
+    fi
+    write_output ${shQuote(config.prCreateStdout)} ${shQuote(config.prCreateStderr)} ${config.prCreateStatus}
+    ;;
+  "pr edit")
+    write_output ${shQuote(config.prEditStdout)} ${shQuote(config.prEditStderr)} ${config.prEditStatus}
+    ;;
+  "pr ready")
+    write_output ${shQuote(config.prReadyStdout)} ${shQuote(config.prReadyStderr)} ${config.prReadyStatus}
     ;;
   "pr view")
-    printf 'false'
-    exit 0
+    write_output ${shQuote(config.prViewStdout)} ${shQuote(config.prViewStderr)} ${config.prViewStatus}
     ;;
   *)
     exit 0
@@ -94,14 +173,14 @@ esac
 `,
     { mode: 0o755 }
   );
-  return ghPath;
+  return { ghPath, prCreateBodyPath };
 }
 
 function shQuote(value) {
   return `'${String(value).replace(/'/g, `'\"'\"'`)}'`;
 }
 
-function setupSyncRepos({ upstreamReadme, upstreamWorkflow }) {
+function setupSyncRepos({ ghOptions, originReadme, originWorkflow, upstreamReadme, upstreamWorkflow }) {
   const sandbox = createTempDir('hardened-upstream-sync-');
   const seed = path.join(sandbox, 'seed');
   const runner = path.join(sandbox, 'runner');
@@ -119,6 +198,18 @@ function setupSyncRepos({ upstreamReadme, upstreamWorkflow }) {
   git(['remote', 'add', 'upstream', upstreamBare], seed);
   git(['push', 'origin', 'main'], seed);
   git(['push', 'upstream', 'main'], seed);
+
+  if (originReadme !== undefined) {
+    writeFile(seed, 'README.md', originReadme);
+  }
+  if (originWorkflow !== undefined) {
+    writeFile(seed, '.github/workflows/test.yml', originWorkflow);
+  }
+  if (originReadme !== undefined || originWorkflow !== undefined) {
+    git(['add', '.'], seed);
+    git(['commit', '-m', 'origin change'], seed);
+    git(['push', 'origin', 'main'], seed);
+  }
 
   cloneRepo(originBare, runner);
   configureRepo(runner);
@@ -139,10 +230,11 @@ function setupSyncRepos({ upstreamReadme, upstreamWorkflow }) {
   git(['push', 'origin', 'main'], upstreamWork);
 
   const binDir = path.join(runner, '.test-bin');
-  installGhStub(binDir);
+  const ghStub = installGhStub(binDir, ghOptions);
 
   return {
     binDir,
+    ghStub,
     originBare,
     runner,
     sandbox,
@@ -176,6 +268,13 @@ function runSyncScript({ runner, binDir, upstreamRepoUrl, syncBranch }) {
 
 function showFileFromBareRepo(repoPath, ref, filePath) {
   return git(['--git-dir', repoPath, 'show', `${ref}:${filePath}`], ROOT);
+}
+
+function listBareRepoHeads(repoPath) {
+  return git(
+    ['--git-dir', repoPath, 'for-each-ref', '--format=%(refname:short)', 'refs/heads'],
+    ROOT
+  ).split(/\r?\n/).filter(Boolean);
 }
 
 describe('hardened upstream sync', () => {
@@ -218,11 +317,45 @@ describe('hardened upstream sync', () => {
     assert.equal(result.status, 0, result.stderr || result.stdout);
     assert.match(result.stdout, /No upstream changes to apply\./);
 
-    const refs = git(
-      ['--git-dir', fixture.originBare, 'for-each-ref', '--format=%(refname:short)', 'refs/heads'],
-      ROOT
-    ).split(/\r?\n/).filter(Boolean);
+    assert.deepEqual(listBareRepoHeads(fixture.originBare), ['main']);
+  });
 
-    assert.deepEqual(refs, ['main']);
+  test('treats merge conflicts as handled, cleans merge state, and does not push a sync branch', () => {
+    const fixture = setupSyncRepos({
+      ghOptions: {
+        issueCreateStatus: 1,
+        issueCreateStderr: 'HTTP 403: issues are disabled',
+        issueListStatus: 1,
+        issueListStderr: 'HTTP 403: issues are disabled',
+      },
+      originReadme: 'origin readme\n',
+      upstreamReadme: 'upstream readme\n',
+    });
+
+    const result = runSyncScript(fixture);
+
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    assert.match(result.stdout, /Merge conflict encountered; cleaned up merge state\./);
+    assert.deepEqual(listBareRepoHeads(fixture.originBare), ['main']);
+    assert.equal(fs.existsSync(path.join(fixture.runner, '.git', 'MERGE_HEAD')), false);
+    assert.equal(git(['status', '--short', '--untracked-files=no'], fixture.runner), '');
+  });
+
+  test('keeps a successful sync best-effort when issue permissions are denied and omits Closes from the PR body', () => {
+    const fixture = setupSyncRepos({
+      ghOptions: {
+        issueCreateStatus: 1,
+        issueCreateStderr: 'HTTP 403: issues are disabled',
+        issueListStatus: 1,
+        issueListStderr: 'HTTP 403: issues are disabled',
+      },
+      upstreamReadme: 'upstream readme\n',
+    });
+
+    const result = runSyncScript(fixture);
+
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    assert.deepEqual(listBareRepoHeads(fixture.originBare).sort(), [fixture.syncBranch, 'main'].sort());
+    assert.equal(fs.readFileSync(fixture.ghStub.prCreateBodyPath, 'utf8').includes('Closes #'), false);
   });
 });
