@@ -7,11 +7,36 @@ git fetch upstream "$UPSTREAM_REF"
 
 git checkout -B "$SYNC_BRANCH" "origin/$BASE_BRANCH"
 before_sha="$(git rev-parse HEAD)"
+before_tree="$(git rev-parse "${before_sha}^{tree}")"
 upstream_sha="$(git rev-parse "upstream/$UPSTREAM_REF")"
 
 find_open_issue_number() {
   local title="$1"
   gh issue list --state open --search "\"$title\" in:title" --json number,title --jq "map(select(.title == \"$title\")) | .[0].number // empty"
+}
+
+exclude_workflow_file_changes() {
+  local workflow_paths=()
+  while IFS= read -r path; do
+    case "$path" in
+      .github/workflows/*)
+        workflow_paths+=("$path")
+        ;;
+    esac
+  done < <(git diff --name-only "$before_sha" HEAD)
+
+  if [ "${#workflow_paths[@]}" -eq 0 ]; then
+    return
+  fi
+
+  for workflow_path in "${workflow_paths[@]}"; do
+    if git cat-file -e "${before_sha}:${workflow_path}" 2>/dev/null; then
+      git checkout "$before_sha" -- "$workflow_path"
+    else
+      rm -f -- "$workflow_path"
+      git rm -f --ignore-unmatch -- "$workflow_path" >/dev/null 2>&1 || true
+    fi
+  done
 }
 
 if ! git merge --no-ff --no-edit "upstream/$UPSTREAM_REF"; then
@@ -35,10 +60,18 @@ EOF
   exit 1
 fi
 
-after_sha="$(git rev-parse HEAD)"
-if [ "$before_sha" = "$after_sha" ]; then
+exclude_workflow_file_changes
+
+after_tree="$(git write-tree)"
+if [ "$before_tree" = "$after_tree" ]; then
+  git reset --hard "$before_sha" >/dev/null
   echo "No upstream changes to apply."
   exit 0
+fi
+
+head_tree="$(git rev-parse HEAD^{tree})"
+if [ "$head_tree" != "$after_tree" ]; then
+  git commit --amend --no-edit >/dev/null
 fi
 
 git push --force-with-lease origin "$SYNC_BRANCH"
