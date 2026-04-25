@@ -58,6 +58,9 @@ function createBareRepo(parentDir, name) {
 
 function toBashPath(repoPath) {
   const normalized = repoPath.replace(/\\/g, '/');
+  if (!/^[A-Za-z]:\//.test(normalized)) {
+    return normalized;
+  }
   return `/mnt/${normalized[0].toLowerCase()}${normalized.slice(2)}`;
 }
 
@@ -176,6 +179,10 @@ function showFileFromBareRepo(repoPath, ref, filePath) {
 }
 
 describe('hardened upstream sync', () => {
+  test('leaves native POSIX paths unchanged for bash execution', () => {
+    assert.equal(toBashPath('/tmp/hardened-upstream-sync-origin.git'), '/tmp/hardened-upstream-sync-origin.git');
+  });
+
   test('excludes workflow file changes while keeping other upstream changes', () => {
     const fixture = setupSyncRepos({
       upstreamReadme: 'upstream readme\n',
