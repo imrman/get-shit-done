@@ -191,13 +191,34 @@ export const phaseAdd: QueryHandler = async (args, projectDir, workstream) => {
     } else {
       // Sequential mode: find highest integer phase number (in current milestone only)
       // Skip 999.x backlog phases — they live outside the active sequence
-      const phasePattern = /#{2,4}\s*Phase\s+(\d+)[A-Z]?(?:\.\d+)*:/gi;
+      // Matches heading (## Phase N:), bullet checklist (- [x] Phase N:), and bold (**Phase N:**)
+      const phasePattern = /(?:^|\n)\s*(?:[-*]\s*(?:\[[x ]\]\s*)?|#{2,4}\s*|\*{1,2}\s*)Phase\s+(\d+)[A-Z]?(?:\.\d+)*:/gi;
       let maxPhase = 0;
       let m: RegExpExecArray | null;
       while ((m = phasePattern.exec(content)) !== null) {
         const num = parseInt(m[1], 10);
         if (num >= 999) continue; // backlog phases use 999.x numbering
         if (num > maxPhase) maxPhase = num;
+      }
+
+      // Belt-and-suspenders: if ROADMAP scan found nothing, fall back to scanning
+      // .planning/phases/ directory names as the canonical source of truth
+      if (maxPhase === 0) {
+        const phasesDir = planningPaths(projectDir, workstream).phases;
+        try {
+          const entries = await readdir(phasesDir, { withFileTypes: true });
+          for (const entry of entries) {
+            if (!entry.isDirectory()) continue;
+            const dirMatch = /^(\d+)[A-Z]?(?:\.\d+)*-/.exec(entry.name);
+            if (dirMatch) {
+              const num = parseInt(dirMatch[1], 10);
+              if (num >= 999) continue;
+              if (num > maxPhase) maxPhase = num;
+            }
+          }
+        } catch {
+          // phases dir may not exist yet — leave maxPhase as 0
+        }
       }
 
       newPhaseId = maxPhase + 1;

@@ -245,6 +245,77 @@ describe('phaseAdd', () => {
     expect(phaseIdx).toBeLessThan(sepIdx);
     expect(phaseIdx).toBeGreaterThan(0);
   });
+
+  it('detects max phase from bullet checklist format (regression #2726)', async () => {
+    const { phaseAdd } = await import('./phase-lifecycle.js');
+
+    const roadmap = [
+      '# Roadmap',
+      '',
+      '## Current Milestone: v5.0',
+      '',
+      '- [x] Phase 76: Data Import',
+      '- [x] Phase 77: Data Transform',
+      '- [ ] Phase 88: Final Cleanup',
+      '',
+    ].join('\n');
+
+    await setupTestProject(tmpDir, {
+      roadmap,
+      state: MINIMAL_STATE,
+      phases: [],
+    });
+
+    const result = await phaseAdd(['new-feature'], tmpDir);
+    const data = result.data as Record<string, unknown>;
+
+    expect(data.phase_number).toBe(89);
+    expect(data.padded).toBe('89');
+  });
+
+  it('detects max phase from bold inline format (regression #2726)', async () => {
+    const { phaseAdd } = await import('./phase-lifecycle.js');
+
+    const roadmap = [
+      '# Roadmap',
+      '',
+      '## Current Milestone: v5.0',
+      '',
+      '**Phase 50: Core Infrastructure**',
+      '**Phase 51: API Layer**',
+      '',
+    ].join('\n');
+
+    await setupTestProject(tmpDir, {
+      roadmap,
+      state: MINIMAL_STATE,
+      phases: [],
+    });
+
+    const result = await phaseAdd(['new-feature'], tmpDir);
+    const data = result.data as Record<string, unknown>;
+
+    expect(data.phase_number).toBe(52);
+  });
+
+  it('falls back to filesystem scan when no phase matches in ROADMAP (regression #2726)', async () => {
+    const { phaseAdd } = await import('./phase-lifecycle.js');
+
+    // ROADMAP with no recognizable phase entries
+    const roadmap = '# Roadmap\n\n## Current Milestone: v5.0\n\nSome content without phases\n';
+
+    await setupTestProject(tmpDir, {
+      roadmap,
+      state: MINIMAL_STATE,
+      phases: ['45-legacy-phase', '46-another-phase'],
+    });
+
+    const result = await phaseAdd(['new-feature'], tmpDir);
+    const data = result.data as Record<string, unknown>;
+
+    // Should detect phases 45 and 46 on disk, so new phase = 47
+    expect(data.phase_number).toBe(47);
+  });
 });
 
 // ─── phaseAddBatch ─────────────────────────────────────────────────────
