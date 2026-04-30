@@ -54,9 +54,22 @@ Full roster at `agents/gsd-*.md`. The "Primary doc" column flags whether [`docs/
 
 ---
 
-## Commands (59 shipped)
+## Commands (65 shipped)
 
 Full roster at `commands/gsd/*.md`. The groupings below mirror `docs/COMMANDS.md` section order; each row carries the command name, a one-line role derived from the command's frontmatter `description:`, and a link to the source file. `tests/command-count-sync.test.cjs` locks the count against the filesystem.
+
+### Namespace Meta-Skills
+
+These six routers are descriptor-only entries that the model picks first; the body of each contains a routing table that points at the correct concrete sub-skill. They exist to keep the eager skill-listing token cost low while the full surface remains reachable. See [#2792](https://github.com/gsd-build/get-shit-done/issues/2792) for the rationale; the routing tables target the post-[#2790](https://github.com/gsd-build/get-shit-done/issues/2790) consolidated surface.
+
+| Command | Role | Source |
+|---------|------|--------|
+| `/gsd-ns-workflow` | Phase pipeline router — discuss / plan / execute / verify / phase / progress. | [commands/gsd/ns-workflow.md](../commands/gsd/ns-workflow.md) |
+| `/gsd-ns-project` | Project lifecycle router — milestones, audits, summary. | [commands/gsd/ns-project.md](../commands/gsd/ns-project.md) |
+| `/gsd-ns-review` | Quality-gate router — code review, debug, audit, security, eval, ui. | [commands/gsd/ns-review.md](../commands/gsd/ns-review.md) |
+| `/gsd-ns-context` | Codebase-intelligence router — map, graphify, docs, learnings. | [commands/gsd/ns-context.md](../commands/gsd/ns-context.md) |
+| `/gsd-ns-manage` | Management router — config, workspace, workstreams, thread, update, ship, inbox. | [commands/gsd/ns-manage.md](../commands/gsd/ns-manage.md) |
+| `/gsd-ns-ideate` | Exploration & capture router — explore, sketch, spike, spec, capture. | [commands/gsd/ns-ideate.md](../commands/gsd/ns-ideate.md) |
 
 ### Core Workflow
 
@@ -335,7 +348,7 @@ The `gsd-planner` agent is decomposed into a core agent plus reference modules t
 
 ---
 
-## CLI Modules (31 shipped)
+## CLI Modules (32 shipped)
 
 Full listing: `get-shit-done/bin/lib/*.cjs`.
 
@@ -346,6 +359,7 @@ Full listing: `get-shit-done/bin/lib/*.cjs`.
 | `commands.cjs` | Misc CLI commands (slug, timestamp, todos, scaffolding, stats) |
 | `config-schema.cjs` | Single source of truth for `VALID_CONFIG_KEYS` and dynamic key patterns; imported by both the validator and the config-schema-docs parity test |
 | `config.cjs` | `config.json` read/write, section initialization; imports validator from `config-schema.cjs` |
+| `context-utilization.cjs` | Pure classifier for `gsd-health --context` — turns (tokensUsed, contextWindow) into a `{ percent, state }` triage result against the 60%/70% fracture-point thresholds (#2792) |
 | `core.cjs` | Error handling, output formatting, shared utilities, runtime fallbacks |
 | `decisions.cjs` | Shared parser for CONTEXT.md `<decisions>` blocks (D-NN entries); used by `gap-checker.cjs` and intended for #2492 plan/verify decision gates |
 | `docs.cjs` | Docs-update workflow init, Markdown scanning, monorepo detection |
