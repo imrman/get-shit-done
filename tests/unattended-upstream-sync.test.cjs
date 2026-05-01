@@ -137,7 +137,7 @@ function setupRepos({ testExit = 0, testOutput = '' } = {}) {
   writeFile(upstreamWork, 'SECURITY.md', 'upstream security should not win\n');
   writeFile(upstreamWork, 'scripts/secret-scan.sh', '#!/usr/bin/env bash\necho upstream secret scan\n', 0o755);
   commitAll(upstreamWork, 'upstream change');
-  git(['push', 'origin', 'main'], upstreamWork);
+  git(['push', 'origin', 'HEAD:main'], upstreamWork);
 
   return { codexHome, home, installLog, originBare, runner, upstreamBare, upstreamWork, validationLog };
 }
@@ -252,7 +252,7 @@ describe('unattended upstream sync script', () => {
     upstreamPkg.scripts.lint = 'node lint.js';
     fs.writeFileSync(path.join(fixture.upstreamWork, 'package.json'), `${JSON.stringify(upstreamPkg, null, 2)}\n`);
     commitAll(fixture.upstreamWork, 'upstream package update');
-    git(['push', 'origin', 'main'], fixture.upstreamWork);
+    git(['push', 'origin', 'HEAD:main'], fixture.upstreamWork);
 
     const result = runScript(fixture);
 
