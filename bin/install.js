@@ -5370,7 +5370,7 @@ function copyCommandsAsClaudeSkills(srcDir, skillsDir, prefix, pathPrefix, runti
       }
       // Hermes Agent reuses Claude skill format; rewrite branding + paths.
       if (runtime === 'hermes') {
-        content = content.replace(/CLAUDE\.md/g, '.hermes.md');
+        content = content.replace(/CLAUDE\.md/g, 'HERMES.md');
         content = content.replace(/\bClaude Code\b/g, 'Hermes Agent');
         content = content.replace(/\.claude\//g, '.hermes/');
       }
@@ -5619,7 +5619,7 @@ function copyWithPathReplacement(srcDir, destDir, pathPrefix, runtime, isCommand
         content = content.replace(/\.claude\//g, '.qwen/');
         fs.writeFileSync(destPath, content);
       } else if (isHermes) {
-        content = content.replace(/CLAUDE\.md/g, '.hermes.md');
+        content = content.replace(/CLAUDE\.md/g, 'HERMES.md');
         content = content.replace(/\bClaude Code\b/g, 'Hermes Agent');
         content = content.replace(/\.claude\//g, '.hermes/');
         fs.writeFileSync(destPath, content);
@@ -5678,7 +5678,7 @@ function copyWithPathReplacement(srcDir, destDir, pathPrefix, runtime, isCommand
       let jsContent = fs.readFileSync(srcPath, 'utf8');
       jsContent = jsContent.replace(/\.claude\/skills\//g, '.hermes/skills/');
       jsContent = jsContent.replace(/\.claude\//g, '.hermes/');
-      jsContent = jsContent.replace(/CLAUDE\.md/g, '.hermes.md');
+      jsContent = jsContent.replace(/CLAUDE\.md/g, 'HERMES.md');
       jsContent = jsContent.replace(/\bClaude Code\b/g, 'Hermes Agent');
       fs.writeFileSync(destPath, jsContent);
     } else {
@@ -7336,7 +7336,7 @@ function install(isGlobal, runtime = 'claude') {
           content = content.replace(/\bClaude Code\b/g, 'Qwen Code');
           content = content.replace(/\.claude\//g, '.qwen/');
         } else if (isHermes) {
-          content = content.replace(/CLAUDE\.md/g, '.hermes.md');
+          content = content.replace(/CLAUDE\.md/g, 'HERMES.md');
           content = content.replace(/\bClaude Code\b/g, 'Hermes Agent');
           content = content.replace(/\.claude\//g, '.hermes/');
         }
@@ -7404,7 +7404,7 @@ function install(isGlobal, runtime = 'claude') {
               content = content.replace(/\bClaude Code\b/g, 'Qwen Code');
             }
             if (isHermes) {
-              content = content.replace(/CLAUDE\.md/g, '.hermes.md');
+              content = content.replace(/CLAUDE\.md/g, 'HERMES.md');
               content = content.replace(/\bClaude Code\b/g, 'Hermes Agent');
             }
             content = content.replace(/\{\{GSD_VERSION\}\}/g, pkg.version);

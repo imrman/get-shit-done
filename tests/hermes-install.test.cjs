@@ -150,14 +150,14 @@ describe('Hermes Agent local install/uninstall', () => {
     uninstall(false, 'hermes');
   });
 
-  test('replaces CLAUDE.md references with .hermes.md (Hermes-discovered project context name)', () => {
+  test('replaces CLAUDE.md references with HERMES.md', () => {
     install(false, 'hermes');
     const targetDir = path.join(tmpDir, '.hermes');
     const skillsDir = path.join(targetDir, 'skills');
 
-    // Walk all skill files and confirm no `CLAUDE.md` token leaks; if any
-    // skill body referenced project context, it should now point at
-    // `.hermes.md` (per https://hermes-agent.nousresearch.com/docs).
+    // Walk all skill files and confirm no `CLAUDE.md` token leaks; any
+    // skill body that referenced project context should now point at
+    // `HERMES.md` per the issue spec.
     let referencedHermesMd = false;
     const walk = (dir) => {
       for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -167,13 +167,13 @@ describe('Hermes Agent local install/uninstall', () => {
         const content = fs.readFileSync(full, 'utf8');
         assert.ok(!/\bCLAUDE\.md\b/.test(content),
           `${path.relative(targetDir, full)} still references CLAUDE.md`);
-        if (/\.hermes\.md/.test(content)) referencedHermesMd = true;
+        if (/\bHERMES\.md\b/.test(content)) referencedHermesMd = true;
       }
     };
     walk(skillsDir);
     // Sanity: at least one skill in the GSD set references the project
     // context filename, so the substitution actually exercises.
-    assert.ok(referencedHermesMd, 'at least one skill references .hermes.md after substitution');
+    assert.ok(referencedHermesMd, 'at least one skill references HERMES.md after substitution');
 
     uninstall(false, 'hermes');
   });
