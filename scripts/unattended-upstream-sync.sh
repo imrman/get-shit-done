@@ -3,6 +3,7 @@ set -euo pipefail
 
 BASE_BRANCH="main"
 DRY_RUN=0
+SKIP_INSTALL=0
 LOCK_FILE=""
 LOG_DIR=""
 ORIGIN_REMOTE="origin"
@@ -47,6 +48,7 @@ Options:
   --lock-file <path>      Lock directory path
   --log-dir <path>        Directory for run logs
   --dry-run               Validate only; skip promotion, push, and install
+  --skip-install          Promote and push after validation, but do not install into CODEX_HOME
   -h, --help              Show this help
 
 Environment:
@@ -91,6 +93,10 @@ while [ "$#" -gt 0 ]; do
       ;;
     --dry-run)
       DRY_RUN=1
+      shift
+      ;;
+    --skip-install)
+      SKIP_INSTALL=1
       shift
       ;;
     -h|--help)
@@ -403,6 +409,9 @@ log "Log file: $LOG_FILE"
 if [ "$DRY_RUN" -eq 1 ]; then
   log "Dry run enabled; promotion, push, and install will be skipped"
 fi
+if [ "$SKIP_INSTALL" -eq 1 ]; then
+  log "Skip install enabled; validated source will not be installed into Codex"
+fi
 
 run git -C "$REPO_DIR" fetch "$ORIGIN_REMOTE" "$BASE_BRANCH"
 run git -C "$REPO_DIR" fetch "$UPSTREAM_URL" "$UPSTREAM_REF"
@@ -448,6 +457,10 @@ fi
 
 promote_local_main "$candidate_sha"
 push_origin_main_best_effort "$candidate_sha"
-install_and_validate_codex "$candidate_sha"
+if [ "$SKIP_INSTALL" -eq 1 ]; then
+  log "Skip install enabled; validated candidate $candidate_sha was promoted and pushed only"
+else
+  install_and_validate_codex "$candidate_sha"
+fi
 
 log "Unattended upstream sync completed"

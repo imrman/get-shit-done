@@ -127,6 +127,10 @@ function setupRepos({ testExit = 0, testOutput = '' } = {}) {
   git(['remote', 'add', 'upstream', upstreamBare], seed);
   git(['push', 'origin', 'main'], seed);
   git(['push', 'upstream', 'main'], seed);
+  git(['--git-dir', originBare, 'symbolic-ref', 'HEAD', 'refs/heads/main'], sandbox);
+  git(['--git-dir', upstreamBare, 'symbolic-ref', 'HEAD', 'refs/heads/main'], sandbox);
+  git(['--git-dir', originBare, 'symbolic-ref', 'HEAD', 'refs/heads/main'], sandbox);
+  git(['--git-dir', upstreamBare, 'symbolic-ref', 'HEAD', 'refs/heads/main'], sandbox);
 
   git(['clone', originBare, runner], sandbox);
   configureRepo(runner);
@@ -237,6 +241,18 @@ describe('unattended upstream sync script', () => {
     assert.equal(showFromBare(fixture.originBare, 'main', 'README.md'), 'upstream readme');
     assert.equal(git(['show', 'HEAD:README.md'], fixture.runner), 'base readme');
     assert.equal(fs.existsSync(path.join(fixture.codexHome, 'get-shit-done', 'VERSION')), true);
+  });
+
+  test('skip-install promotes and pushes validated source without touching Codex home', () => {
+    const fixture = setupRepos();
+
+    const result = runScript(fixture, ['--skip-install']);
+
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    assert.match(result.stdout, /Skip install enabled/);
+    assert.equal(showFromBare(fixture.originBare, 'main', 'README.md'), 'upstream readme');
+    assert.equal(fs.existsSync(fixture.installLog), false);
+    assert.equal(fs.existsSync(path.join(fixture.codexHome, 'get-shit-done', 'VERSION')), false);
   });
 
   test('package.json conflict takes upstream package data and preserves local sync scripts', () => {
