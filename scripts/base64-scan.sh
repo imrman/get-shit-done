@@ -14,6 +14,7 @@
 #   1 = findings detected
 #   2 = usage error
 set -euo pipefail
+export LC_ALL=C
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MIN_BLOB_LENGTH=40
