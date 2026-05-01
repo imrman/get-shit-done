@@ -147,7 +147,7 @@ function setupRepos({ testExit = 0, testOutput = '' } = {}) {
   return { codexHome, home, installLog, originBare, runner, upstreamBare, upstreamWork, validationLog };
 }
 
-function runScript(fixture, extraArgs = []) {
+function runScript(fixture, extraArgs = [], extraEnv = {}) {
   return spawnSync('bash', [
     SCRIPT_PATH,
     '--repo', fixture.runner,
@@ -166,6 +166,7 @@ function runScript(fixture, extraArgs = []) {
       GSD_SYNC_MIN_SKILLS: '2',
       INSTALL_LOG: fixture.installLog,
       VALIDATION_LOG: fixture.validationLog,
+      ...extraEnv,
     },
   });
 }
@@ -299,5 +300,50 @@ describe('unattended upstream sync script', () => {
     assert.equal(mergedPkg.scripts.lint, 'node lint.js');
     assert.equal(mergedPkg.scripts['sync:upstream:unattended'], 'bash scripts/unattended-upstream-sync.sh');
     assert.equal(mergedPkg.scripts['sync:upstream:dry-run'], 'bash scripts/unattended-upstream-sync.sh --dry-run');
+  });
+
+  test('rejects unsafe GSD_SYNC_PRESERVE_PATHS entries before promotion or install', () => {
+    const unsafePaths = [
+      '/tmp/outside',
+      '../outside',
+      'hooks//evil',
+      'hooks/',
+      ':(glob)hooks/*',
+      '.',
+      '..',
+      '-rf',
+    ];
+
+    for (const unsafePath of unsafePaths) {
+      const fixture = setupRepos();
+
+      const result = runScript(fixture, [], { GSD_SYNC_PRESERVE_PATHS: unsafePath });
+
+      assert.notEqual(result.status, 0, `expected ${unsafePath} to be rejected`);
+      assert.match(result.stderr + result.stdout, /Unsafe preserve path/);
+      assert.equal(showFromBare(fixture.originBare, 'main', 'README.md'), 'base readme');
+      assert.equal(fs.existsSync(fixture.installLog), false);
+    }
+  });
+
+  test('preserves newer fetched origin hardening when local main is stale', () => {
+    const fixture = setupRepos();
+    const originWork = path.join(path.dirname(fixture.runner), 'origin-work');
+    git(['clone', fixture.originBare, originWork], path.dirname(fixture.runner));
+    configureRepo(originWork);
+    writeFile(originWork, 'SECURITY.md', 'origin newer hardened security\n');
+    writeFile(originWork, '.github/workflows/hardened.yml', 'name: origin newer hardened workflow\n');
+    writeFile(originWork, 'scripts/secret-scan.sh', createScanner('secret-new'), 0o755);
+    commitAll(originWork, 'origin hardening update');
+    git(['push', 'origin', 'HEAD:main'], originWork);
+    assert.equal(git(['show', 'HEAD:SECURITY.md'], fixture.runner), 'origin hardened security');
+
+    const result = runScript(fixture, ['--skip-install']);
+
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    assert.equal(showFromBare(fixture.originBare, 'main', 'README.md'), 'upstream readme');
+    assert.equal(showFromBare(fixture.originBare, 'main', 'SECURITY.md'), 'origin newer hardened security');
+    assert.equal(showFromBare(fixture.originBare, 'main', '.github/workflows/hardened.yml'), 'name: origin newer hardened workflow');
+    assert.equal(showFromBare(fixture.originBare, 'main', 'scripts/secret-scan.sh'), createScanner('secret-new').trim());
   });
 });

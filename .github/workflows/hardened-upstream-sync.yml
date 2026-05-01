@@ -30,6 +30,7 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Set up Node.js
         uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f  # v6.3.0
@@ -47,7 +48,25 @@ jobs:
 
       - name: Sync upstream, build, test, scan, and update main
         shell: bash
+        env:
+          GH_PUSH_TOKEN: ${{ github.token }}
         run: |
+          cleanup_git_credentials() {
+            git config --local --unset-all http.https://github.com/.extraheader || true
+          }
+          trap cleanup_git_credentials EXIT
+
+          if [ -z "${GH_PUSH_TOKEN:-}" ]; then
+            echo "GH_PUSH_TOKEN is not set" >&2
+            exit 1
+          fi
+
+          printf '::add-mask::%s\n' "$GH_PUSH_TOKEN"
+          auth_header="$(printf 'x-access-token:%s' "$GH_PUSH_TOKEN" | base64 | tr -d '\n')"
+          printf '::add-mask::%s\n' "$auth_header"
+          unset GH_PUSH_TOKEN
+          git config --local http.https://github.com/.extraheader "AUTHORIZATION: basic ${auth_header}"
+
           bash ./scripts/unattended-upstream-sync.sh \
             --repo "$GITHUB_WORKSPACE" \
             --base-branch "$BASE_BRANCH" \

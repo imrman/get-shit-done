@@ -135,7 +135,44 @@ fi
 
 mkdir -p "$WORK_ROOT" "$LOG_DIR"
 LOG_FILE="$LOG_DIR/$(date -u +%Y%m%dT%H%M%SZ).log"
-exec > >(tee -a "$LOG_FILE") 2> >(tee -a "$LOG_FILE" >&2)
+LOG_PIPE_DIR=""
+LOG_STDOUT_PIPE=""
+LOG_STDERR_PIPE=""
+LOG_STDOUT_TEE_PID=""
+LOG_STDERR_TEE_PID=""
+
+setup_logging() {
+  exec 3>&1 4>&2
+
+  LOG_PIPE_DIR="$(mktemp -d "$LOG_DIR/gsd-sync-logger.XXXXXX")"
+  LOG_STDOUT_PIPE="$LOG_PIPE_DIR/stdout.pipe"
+  LOG_STDERR_PIPE="$LOG_PIPE_DIR/stderr.pipe"
+  mkfifo "$LOG_STDOUT_PIPE" "$LOG_STDERR_PIPE"
+
+  tee -a "$LOG_FILE" <"$LOG_STDOUT_PIPE" >&3 &
+  LOG_STDOUT_TEE_PID=$!
+  tee -a "$LOG_FILE" <"$LOG_STDERR_PIPE" >&4 &
+  LOG_STDERR_TEE_PID=$!
+
+  exec >"$LOG_STDOUT_PIPE" 2>"$LOG_STDERR_PIPE"
+}
+
+teardown_logging() {
+  exec 1>&3 2>&4
+  exec 3>&- 4>&-
+
+  if [ -n "$LOG_STDOUT_TEE_PID" ]; then
+    wait "$LOG_STDOUT_TEE_PID" 2>/dev/null || true
+  fi
+  if [ -n "$LOG_STDERR_TEE_PID" ]; then
+    wait "$LOG_STDERR_TEE_PID" 2>/dev/null || true
+  fi
+
+  rm -f "$LOG_STDOUT_PIPE" "$LOG_STDERR_PIPE"
+  rmdir "$LOG_PIPE_DIR" 2>/dev/null || true
+}
+
+setup_logging
 
 log() {
   printf '[%s] %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*"
@@ -146,14 +183,11 @@ fail() {
   exit 1
 }
 
-if ! mkdir "$LOCK_FILE" 2>/dev/null; then
-  fail "Sync lock is already held: $LOCK_FILE"
-fi
-
 SYNC_BRANCH=""
 SYNC_WORKTREE=""
 BASE_PRESERVE_REF=""
 CLEANED=0
+PRESERVE_PATHS=()
 
 cleanup() {
   local status=$?
@@ -166,32 +200,77 @@ cleanup() {
       git -C "$REPO_DIR" branch -D "$SYNC_BRANCH" >/dev/null 2>&1 || true
     fi
     rmdir "$LOCK_FILE" >/dev/null 2>&1 || true
+    teardown_logging
   fi
   exit "$status"
 }
 trap cleanup EXIT INT TERM
+
+if ! mkdir "$LOCK_FILE" 2>/dev/null; then
+  fail "Sync lock is already held: $LOCK_FILE"
+fi
 
 run() {
   log "+ $*"
   "$@"
 }
 
-read_preserve_paths() {
+validate_preserve_path() {
+  local preserve_path="$1"
+
+  case "$preserve_path" in
+    ""|"."|"..")
+      fail "Unsafe preserve path: $preserve_path"
+      ;;
+    /*)
+      fail "Unsafe preserve path uses absolute path: $preserve_path"
+      ;;
+    -*)
+      fail "Unsafe preserve path starts with dash: $preserve_path"
+      ;;
+    :*)
+      fail "Unsafe preserve path uses pathspec magic: $preserve_path"
+      ;;
+    */|*//*)
+      fail "Unsafe preserve path has empty component: $preserve_path"
+      ;;
+    ./*|*/./*|*/.)
+      fail "Unsafe preserve path has current-directory component: $preserve_path"
+      ;;
+    ../*|*/../*|*/..)
+      fail "Unsafe preserve path has parent traversal: $preserve_path"
+      ;;
+  esac
+}
+
+load_preserve_paths() {
+  local preserve_path
+  PRESERVE_PATHS=()
+
   if [ -n "${GSD_SYNC_PRESERVE_PATHS:-}" ]; then
-    printf '%s\n' "$GSD_SYNC_PRESERVE_PATHS" | sed '/^[[:space:]]*$/d'
+    while IFS= read -r preserve_path || [ -n "$preserve_path" ]; do
+      if [ -z "${preserve_path//[[:space:]]/}" ]; then
+        continue
+      fi
+      validate_preserve_path "$preserve_path"
+      PRESERVE_PATHS+=("$preserve_path")
+    done <<< "$GSD_SYNC_PRESERVE_PATHS"
   else
-    printf '%s\n' "${PRESERVE_PATHS_DEFAULT[@]}"
+    for preserve_path in "${PRESERVE_PATHS_DEFAULT[@]}"; do
+      validate_preserve_path "$preserve_path"
+      PRESERVE_PATHS+=("$preserve_path")
+    done
   fi
 }
 
 is_preserved_path() {
   local candidate="$1"
   local preserved
-  while IFS= read -r preserved; do
+  for preserved in "${PRESERVE_PATHS[@]}"; do
     if [ "$candidate" = "$preserved" ] || [[ "$candidate" == "$preserved/"* ]]; then
       return 0
     fi
-  done < <(read_preserve_paths)
+  done
   return 1
 }
 
@@ -209,9 +288,9 @@ restore_path_from_base() {
 
 restore_preserved_paths() {
   local preserved_path
-  while IFS= read -r preserved_path; do
+  for preserved_path in "${PRESERVE_PATHS[@]}"; do
     restore_path_from_base "$preserved_path"
-  done < <(read_preserve_paths)
+  done
   git -C "$SYNC_WORKTREE" add -A -- .github SECURITY.md hooks scripts >/dev/null 2>&1 || true
 }
 
@@ -423,16 +502,23 @@ fi
 if [ "$SKIP_INSTALL" -eq 1 ]; then
   log "Skip install enabled; validated source will not be installed into Codex"
 fi
+load_preserve_paths
 
 run git -C "$REPO_DIR" fetch "$ORIGIN_REMOTE" "$BASE_BRANCH"
+origin_sha="$(git -C "$REPO_DIR" rev-parse FETCH_HEAD)"
+local_base_sha="$(git -C "$REPO_DIR" rev-parse "$BASE_BRANCH")"
+if ! git -C "$REPO_DIR" merge-base --is-ancestor "$local_base_sha" "$origin_sha" &&
+   ! git -C "$REPO_DIR" merge-base --is-ancestor "$origin_sha" "$local_base_sha"; then
+  fail "Local ${BASE_BRANCH} and fetched ${ORIGIN_REMOTE}/${BASE_BRANCH} have diverged; refusing unattended sync"
+fi
 run git -C "$REPO_DIR" fetch "$UPSTREAM_URL" "$UPSTREAM_REF"
 upstream_sha="$(git -C "$REPO_DIR" rev-parse FETCH_HEAD)"
-BASE_PRESERVE_REF="$(git -C "$REPO_DIR" rev-parse "$BASE_BRANCH")"
+BASE_PRESERVE_REF="$origin_sha"
 
 SYNC_BRANCH="gsd-sync/upstream-${UPSTREAM_REF}-$(date -u +%Y%m%d%H%M%S)-$$"
 SYNC_WORKTREE="$WORK_ROOT/${SYNC_BRANCH//\//-}"
 
-run git -C "$REPO_DIR" branch "$SYNC_BRANCH" "$BASE_PRESERVE_REF"
+run git -C "$REPO_DIR" branch "$SYNC_BRANCH" "$local_base_sha"
 run git -C "$REPO_DIR" worktree add --detach "$SYNC_WORKTREE" "$SYNC_BRANCH"
 run git -C "$SYNC_WORKTREE" config user.name "GSD Upstream Sync"
 run git -C "$SYNC_WORKTREE" config user.email "gsd-upstream-sync@local"
