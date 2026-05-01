@@ -139,6 +139,7 @@ function setupRepos({ testExit = 0, testOutput = '' } = {}) {
   configureRepo(upstreamWork);
   writeFile(upstreamWork, 'README.md', 'upstream readme\n');
   writeFile(upstreamWork, 'SECURITY.md', 'upstream security should not win\n');
+  writeFile(upstreamWork, '.github/workflows/canary.yml', 'name: upstream workflow should not win\n');
   writeFile(upstreamWork, 'scripts/secret-scan.sh', '#!/usr/bin/env bash\necho upstream secret scan\n', 0o755);
   commitAll(upstreamWork, 'upstream change');
   git(['push', 'origin', 'HEAD:main'], upstreamWork);
@@ -173,6 +174,15 @@ function showFromBare(repoPath, ref, filePath) {
   return git(['--git-dir', repoPath, 'show', `${ref}:${filePath}`], ROOT);
 }
 
+function existsInBare(repoPath, ref, filePath) {
+  try {
+    git(['--git-dir', repoPath, 'cat-file', '-e', `${ref}:${filePath}`], ROOT);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 describe('unattended upstream sync script', () => {
   test('syncs upstream changes, preserves hardened fork files, validates, pushes, and installs Codex skills', () => {
     const fixture = setupRepos();
@@ -183,6 +193,7 @@ describe('unattended upstream sync script', () => {
     assert.equal(showFromBare(fixture.originBare, 'main', 'README.md'), 'upstream readme');
     assert.equal(showFromBare(fixture.originBare, 'main', 'SECURITY.md'), 'origin hardened security');
     assert.equal(showFromBare(fixture.originBare, 'main', 'scripts/secret-scan.sh'), createScanner('secret').trim());
+    assert.equal(existsInBare(fixture.originBare, 'main', '.github/workflows/canary.yml'), false);
     assert.match(fs.readFileSync(fixture.validationLog, 'utf8'), /npm test/);
     assert.match(fs.readFileSync(fixture.validationLog, 'utf8'), /prompt --diff [0-9a-f]{40}/);
     assert.match(fs.readFileSync(fixture.validationLog, 'utf8'), /base64 --diff [0-9a-f]{40}/);
@@ -253,6 +264,16 @@ describe('unattended upstream sync script', () => {
     assert.equal(showFromBare(fixture.originBare, 'main', 'README.md'), 'upstream readme');
     assert.equal(fs.existsSync(fixture.installLog), false);
     assert.equal(fs.existsSync(path.join(fixture.codexHome, 'get-shit-done', 'VERSION')), false);
+  });
+
+  test('require-push fails when the validated candidate cannot be pushed', () => {
+    const fixture = setupRepos();
+    writeFile(fixture.originBare, 'hooks/pre-receive', '#!/usr/bin/env bash\nexit 1\n', 0o755);
+
+    const result = runScript(fixture, ['--require-push', '--skip-install']);
+
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr + result.stdout, /Unable to push origin\/main/);
   });
 
   test('package.json conflict takes upstream package data and preserves local sync scripts', () => {

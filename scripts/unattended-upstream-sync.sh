@@ -3,6 +3,7 @@ set -euo pipefail
 
 BASE_BRANCH="main"
 DRY_RUN=0
+REQUIRE_PUSH=0
 SKIP_INSTALL=0
 LOCK_FILE=""
 LOG_DIR=""
@@ -48,6 +49,7 @@ Options:
   --lock-file <path>      Lock directory path
   --log-dir <path>        Directory for run logs
   --dry-run               Validate only; skip promotion, push, and install
+  --require-push          Fail if pushing the validated candidate fails
   --skip-install          Promote and push after validation, but do not install into CODEX_HOME
   -h, --help              Show this help
 
@@ -93,6 +95,10 @@ while [ "$#" -gt 0 ]; do
       ;;
     --dry-run)
       DRY_RUN=1
+      shift
+      ;;
+    --require-push)
+      REQUIRE_PUSH=1
       shift
       ;;
     --skip-install)
@@ -192,6 +198,8 @@ is_preserved_path() {
 restore_path_from_base() {
   local preserved_path="$1"
   if git -C "$SYNC_WORKTREE" cat-file -e "${BASE_PRESERVE_REF}:${preserved_path}" 2>/dev/null; then
+    rm -rf "$SYNC_WORKTREE/$preserved_path"
+    git -C "$SYNC_WORKTREE" rm -r --ignore-unmatch -- "$preserved_path" >/dev/null 2>&1 || true
     git -C "$SYNC_WORKTREE" checkout "$BASE_PRESERVE_REF" -- "$preserved_path"
   else
     rm -rf "$SYNC_WORKTREE/$preserved_path"
@@ -309,6 +317,9 @@ push_origin_main_best_effort() {
   if run git -C "$SYNC_WORKTREE" push "$ORIGIN_REMOTE" "$candidate_sha:$BASE_BRANCH"; then
     log "Pushed ${ORIGIN_REMOTE}/${BASE_BRANCH}"
   else
+    if [ "$REQUIRE_PUSH" -eq 1 ]; then
+      fail "Unable to push ${ORIGIN_REMOTE}/${BASE_BRANCH}"
+    fi
     log "WARNING: unable to push ${ORIGIN_REMOTE}/${BASE_BRANCH}; local ${BASE_BRANCH} remains validated"
   fi
 }

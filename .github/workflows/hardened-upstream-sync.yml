@@ -54,4 +54,5 @@ jobs:
             --upstream-url "$UPSTREAM_REPO" \
             --upstream-ref "$UPSTREAM_REF" \
             --log-dir "$RUNNER_TEMP/gsd-upstream-sync" \
+            --require-push \
             --skip-install
