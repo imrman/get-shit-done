@@ -17,6 +17,8 @@ import { CLITransport } from './cli-transport.js';
 import { WSTransport } from './ws-transport.js';
 import { InitRunner } from './init-runner.js';
 import { validateWorkstreamName } from './workstream-utils.js';
+import { loadConfig } from './config.js';
+import { assertRuntimeSupportsAutoMode } from './runtime-gate.js';
 
 // ─── Parsed CLI args ─────────────────────────────────────────────────────────
 
@@ -341,6 +343,32 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
     return;
   }
 
+  // Fall back to GSD_WORKSTREAM env var when --ws is not supplied (#2791).
+  // gsd-tools.cjs resolves the active workstream via this env var; parity
+  // means gsd-sdk query commands see the same .planning/ path as gsd-tools.
+  if (args.ws === undefined && process.env.GSD_WORKSTREAM) {
+    const envWs = process.env.GSD_WORKSTREAM;
+    if (validateWorkstreamName(envWs)) {
+      args = { ...args, ws: envWs };
+    }
+    // If the env var contains an invalid name, silently ignore it (same as CJS).
+  }
+
+  // Multi-repo project-root resolution (issue #2623).
+  //
+  // When the user launches `gsd-sdk` from inside a `sub_repos`-listed child repo,
+  // `projectDir` defaults to `process.cwd()` which points at the child, not the
+  // parent workspace that owns `.planning/`. Mirror the legacy `gsd-tools.cjs`
+  // walk-up semantics so handlers see the correct project root.
+  //
+  // Idempotent: if `projectDir` already has its own `.planning/` (including an
+  // explicit `--project-dir` pointing at the workspace root), findProjectRoot
+  // returns it unchanged.
+  {
+    const { findProjectRoot } = await import('./query/helpers.js');
+    args = { ...args, projectDir: findProjectRoot(args.projectDir) };
+  }
+
   // ─── Query command ──────────────────────────────────────────────────────
   if (args.command === 'query') {
     const { createRegistry } = await import('./query/index.js');
@@ -408,7 +436,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
         }
         console.log(JSON.stringify(output, null, 2));
       } else {
-        const result = await registry.dispatch(matched.cmd, matched.args, args.projectDir);
+        const result = await registry.dispatch(matched.cmd, matched.args, args.projectDir, args.ws);
         let output: unknown = result.data;
 
         if (pickField) {
@@ -530,6 +558,18 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
 
   // ─── Auto command ─────────────────────────────────────────────────────────
   if (args.command === 'auto') {
+    // #2832: refuse to silently route non-Claude runtime projects through the
+    // Claude Agent SDK. Load project config (best effort — falls back to
+    // defaults when missing) and gate before constructing GSD/InitRunner.
+    try {
+      const cfg = await loadConfig(args.projectDir, args.ws);
+      assertRuntimeSupportsAutoMode(cfg);
+    } catch (err) {
+      console.error(`Fatal error: ${(err as Error).message}`);
+      process.exitCode = 1;
+      return;
+    }
+
     const gsd = new GSD({
       projectDir: args.projectDir,
       model: args.model,

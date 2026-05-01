@@ -16,6 +16,8 @@ import {
   roadmapGetPhase,
   getMilestoneInfo,
   extractCurrentMilestone,
+  extractNextMilestoneSection,
+  extractPhasesFromSection,
   stripShippedMilestones,
 } from './roadmap.js';
 
@@ -100,6 +102,63 @@ describe('stripShippedMilestones', () => {
   it('returns content unchanged when no details blocks', () => {
     expect(stripShippedMilestones('no details here')).toBe('no details here');
   });
+
+  // Bug #2496: inline ✅ SHIPPED heading sections must be stripped
+  it('strips ## heading sections marked ✅ SHIPPED', () => {
+    const content = [
+      '## Milestone v1.0: MVP — ✅ SHIPPED 2026-01-15',
+      '',
+      'Phase 1, Phase 2',
+      '',
+      '## Milestone v2.0: Current',
+      '',
+      'Phase 3',
+    ].join('\n');
+    const stripped = stripShippedMilestones(content);
+    expect(stripped).not.toContain('MVP');
+    expect(stripped).not.toContain('v1.0');
+    expect(stripped).toContain('v2.0');
+    expect(stripped).toContain('Current');
+  });
+
+  it('strips multiple inline SHIPPED sections and leaves non-shipped content', () => {
+    const content = [
+      '## Milestone v1.0: Alpha — ✅ SHIPPED 2026-01-01',
+      '',
+      'Old content',
+      '',
+      '## Milestone v1.5: Beta — ✅ SHIPPED 2026-02-01',
+      '',
+      'More old content',
+      '',
+      '## Milestone v2.0: Gamma',
+      '',
+      'Current content',
+    ].join('\n');
+    const stripped = stripShippedMilestones(content);
+    expect(stripped).not.toContain('Alpha');
+    expect(stripped).not.toContain('Beta');
+    expect(stripped).toContain('Gamma');
+    expect(stripped).toContain('Current content');
+  });
+
+  // Bug #2508 follow-up: ### headings must be stripped too
+  it('strips ### heading sections marked ✅ SHIPPED', () => {
+    const content = [
+      '### Milestone v1.0: MVP — ✅ SHIPPED 2026-01-15',
+      '',
+      'Phase 1, Phase 2',
+      '',
+      '### Milestone v2.0: Current',
+      '',
+      'Phase 3',
+    ].join('\n');
+    const stripped = stripShippedMilestones(content);
+    expect(stripped).not.toContain('MVP');
+    expect(stripped).not.toContain('v1.0');
+    expect(stripped).toContain('v2.0');
+    expect(stripped).toContain('Current');
+  });
 });
 
 // ─── getMilestoneInfo ─────────────────────────────────────────────────────
@@ -158,6 +217,66 @@ describe('getMilestoneInfo', () => {
     expect(info.version).toBe('v1.0');
     expect(info.name).toBe('milestone');
   });
+
+  // Bug #2495: STATE.md must take priority over ROADMAP heading matching
+  it('prefers STATE.md milestone over ROADMAP heading match', async () => {
+    const roadmap = [
+      '## Milestone v1.0: Shipped — ✅ SHIPPED 2026-01-01',
+      '',
+      'Phase 1',
+      '',
+      '## Milestone v2.0: Current Active',
+      '',
+      'Phase 2',
+    ].join('\n');
+    await writeFile(join(tmpDir, '.planning', 'ROADMAP.md'), roadmap);
+    await writeFile(
+      join(tmpDir, '.planning', 'STATE.md'),
+      '---\nmilestone: v2.0\nmilestone_name: Current Active\n---\n',
+    );
+    const info = await getMilestoneInfo(tmpDir);
+    expect(info.version).toBe('v2.0');
+    expect(info.name).toBe('Current Active');
+  });
+
+  // Bug #2508 follow-up: STATE.md has milestone version but no milestone_name —
+  // should use ROADMAP for the real name, still prefer STATE.md for version.
+  it('uses ROADMAP name when STATE.md has milestone version but no milestone_name', async () => {
+    const roadmap = [
+      '## Milestone v2.0: Real Name From Roadmap',
+      '',
+      'Phase 2',
+    ].join('\n');
+    await writeFile(join(tmpDir, '.planning', 'ROADMAP.md'), roadmap);
+    await writeFile(
+      join(tmpDir, '.planning', 'STATE.md'),
+      '---\nmilestone: v2.0\n---\n',  // no milestone_name
+    );
+    const info = await getMilestoneInfo(tmpDir);
+    expect(info.version).toBe('v2.0');
+    expect(info.name).toBe('Real Name From Roadmap');
+  });
+
+  it('returns correct milestone from STATE.md even when ROADMAP inline-SHIPPED stripping would fix it', async () => {
+    // ROADMAP with an unstripped shipped milestone heading (pre-fix state)
+    const roadmap = [
+      '## Milestone v1.0: Old — ✅ SHIPPED 2026-01-01',
+      '',
+      'Old phases',
+      '',
+      '## Milestone v2.0: New',
+      '',
+      'New phases',
+    ].join('\n');
+    await writeFile(join(tmpDir, '.planning', 'ROADMAP.md'), roadmap);
+    await writeFile(
+      join(tmpDir, '.planning', 'STATE.md'),
+      '---\nmilestone: v2.0\nmilestone_name: New\n---\n',
+    );
+    const info = await getMilestoneInfo(tmpDir);
+    expect(info.version).toBe('v2.0');
+    expect(info.name).toBe('New');
+  });
 });
 
 // ─── extractCurrentMilestone ──────────────────────────────────────────────
@@ -205,6 +324,69 @@ describe('extractCurrentMilestone', () => {
     expect(result).not.toContain('Parking lot');
     // Must include the actual v2.0 content
     expect(result).toContain('Phase 100');
+  });
+
+  // ─── Bug #2619: phase heading containing vX.Y triggers truncation ─────
+  it('bug-2619: does not truncate at a phase heading containing vX.Y', async () => {
+    // A phase title like "Phase 12: v1.0 Tech-Debt Closure" was being treated
+    // as a milestone boundary because the greedy `.*v(\d+(?:\.\d+)+)` branch
+    // in nextMilestoneRegex matched any heading with a version literal.
+    const roadmapWithPhaseVersion = `# ROADMAP
+
+## Phases
+
+### 🚧 v1.1 Launch-Ready (In Progress)
+
+### Phase 11: Structured Logging
+**Goal**: Add structured logging
+
+### Phase 12: v1.0 Tech-Debt Closure
+**Goal**: Close out v1.0 debt
+
+### Phase 19: Security Audit
+**Goal**: Full security audit
+`;
+    const state = `---\nmilestone: v1.1\n---\n# State\n`;
+    await writeFile(join(tmpDir, '.planning', 'STATE.md'), state);
+    await writeFile(join(tmpDir, '.planning', 'ROADMAP.md'), roadmapWithPhaseVersion);
+
+    const result = await extractCurrentMilestone(roadmapWithPhaseVersion, tmpDir);
+
+    // Phase 12 and Phase 19 must both survive — the slice cannot be truncated
+    // at "### Phase 12: v1.0 Tech-Debt Closure".
+    expect(result).toContain('### Phase 12: v1.0 Tech-Debt Closure');
+    expect(result).toContain('### Phase 19: Security Audit');
+  });
+
+  // ─── Bug #2619 (CodeRabbit follow-up): case-insensitive Phase lookahead ───
+  it('bug-2619: does not truncate at PHASE/phase heading containing vX.Y (case-insensitive)', async () => {
+    // The negative lookahead `(?!Phase\s+\S)` must be case-insensitive so that
+    // headings like "### PHASE 12: v1.0 Tech-Debt" or "### phase 12: v1.0 …"
+    // are also excluded from milestone-boundary matching.
+    const roadmapMixedCase = `# ROADMAP
+
+## Phases
+
+### 🚧 v1.1 Launch-Ready (In Progress)
+
+### PHASE 11: Structured Logging
+**Goal**: Add structured logging
+
+### phase 12: v1.0 Tech-Debt Closure
+**Goal**: Close out v1.0 debt
+
+### Phase 19: Security Audit
+**Goal**: Full security audit
+`;
+    const state = `---\nmilestone: v1.1\n---\n# State\n`;
+    await writeFile(join(tmpDir, '.planning', 'STATE.md'), state);
+    await writeFile(join(tmpDir, '.planning', 'ROADMAP.md'), roadmapMixedCase);
+
+    const result = await extractCurrentMilestone(roadmapMixedCase, tmpDir);
+
+    expect(result).toContain('### PHASE 11: Structured Logging');
+    expect(result).toContain('### phase 12: v1.0 Tech-Debt Closure');
+    expect(result).toContain('### Phase 19: Security Audit');
   });
 
   // ─── Bug #2422: same-version sub-heading truncation ───────────────────
@@ -355,5 +537,101 @@ describe('roadmapAnalyze', () => {
     const data2 = result2.data as Record<string, unknown>;
 
     expect((data1.phases as unknown[]).length).toBe((data2.phases as unknown[]).length);
+  });
+});
+
+// ─── extractPhasesFromSection + extractNextMilestoneSection (#2497) ──────
+
+describe('extractPhasesFromSection', () => {
+  it('parses phase number, name, goal, and depends_on from a milestone section', () => {
+    const section = [
+      '',
+      '### Phase 31: Email Schema',
+      '**Goal**: Set up Prisma models.',
+      '**Depends on**: None',
+      '',
+      '### Phase 32: Today\'s Sheets',
+      '**Goal**: Port the GAS sender.',
+      '**Depends on**: Phase 31',
+      '',
+    ].join('\n');
+    const phases = extractPhasesFromSection(section);
+    expect(phases).toEqual([
+      { number: '31', name: 'Email Schema', goal: 'Set up Prisma models.', depends_on: 'None' },
+      { number: '32', name: "Today's Sheets", goal: 'Port the GAS sender.', depends_on: 'Phase 31' },
+    ]);
+  });
+
+  it('returns empty array when section has no phase headings', () => {
+    expect(extractPhasesFromSection('no phases here\njust prose.')).toEqual([]);
+  });
+});
+
+describe('extractNextMilestoneSection', () => {
+  const MULTI = [
+    '# Roadmap',
+    '',
+    '## Milestone v1.0: Old — ✅ SHIPPED 2026-01-01',
+    '',
+    'Shipped stuff.',
+    '',
+    '## Milestone v2.0.5: Current Milestone',
+    '',
+    '### Phase 35: Audit',
+    '**Goal**: Audit schemas.',
+    '',
+    '## Milestone v2.1: Daily Emails',
+    '',
+    '### Phase 31: Schema',
+    '**Goal**: Build schema.',
+    '**Depends on**: None',
+    '',
+    '### Phase 32: Sending',
+    '**Goal**: Send emails.',
+    '**Depends on**: Phase 31',
+    '',
+    '## Milestone v2.2: Later',
+    '',
+    '### Phase 99: Future',
+    '**Goal**: Later work.',
+  ].join('\n');
+
+  it('returns the milestone immediately after the active one (STATE-driven)', async () => {
+    await writeFile(join(tmpDir, '.planning', 'ROADMAP.md'), MULTI);
+    await writeFile(
+      join(tmpDir, '.planning', 'STATE.md'),
+      '---\nmilestone: v2.0.5\nmilestone_name: Current Milestone\n---\n',
+    );
+    const next = await extractNextMilestoneSection(MULTI, tmpDir);
+    expect(next).not.toBeNull();
+    expect(next!.version).toBe('v2.1');
+    expect(next!.name).toBe('Daily Emails');
+    // Phases parse correctly from the returned section — only v2.1 phases,
+    // not v2.2's Phase 99.
+    const phases = extractPhasesFromSection(next!.section).map(p => p.number);
+    expect(phases).toEqual(['31', '32']);
+  });
+
+  it('returns null when the active milestone is the last one in ROADMAP', async () => {
+    const roadmap = [
+      '# Roadmap',
+      '',
+      '## Milestone v2.0.5: Last One',
+      '',
+      '### Phase 35: Final',
+      '**Goal**: Final work.',
+    ].join('\n');
+    await writeFile(join(tmpDir, '.planning', 'ROADMAP.md'), roadmap);
+    await writeFile(
+      join(tmpDir, '.planning', 'STATE.md'),
+      '---\nmilestone: v2.0.5\n---\n',
+    );
+    const next = await extractNextMilestoneSection(roadmap, tmpDir);
+    expect(next).toBeNull();
+  });
+
+  it('returns null when no current milestone can be resolved', async () => {
+    const next = await extractNextMilestoneSection('# Roadmap\nno milestones\n', tmpDir);
+    expect(next).toBeNull();
   });
 });

@@ -79,13 +79,26 @@ export function getAgentToModelMapForProfile(normalizedProfile: string): Record<
  * @returns QueryResult with the config value at the given path
  * @throws GSDError with Validation classification if key missing or not found
  */
-export const configGet: QueryHandler = async (args, projectDir) => {
-  const keyPath = args[0];
-  if (!keyPath) {
-    throw new GSDError('Usage: config-get <key.path>', ErrorClassification.Validation);
+export const configGet: QueryHandler = async (args, projectDir, workstream) => {
+  // Support --default <value> flag (#2803): return this value (exit 0) when the
+  // key is absent, mirroring gsd-tools.cjs config-get behavior from #1893.
+  const defaultIdx = args.indexOf('--default');
+  let defaultValue: string | undefined;
+  let filteredArgs = args;
+  if (defaultIdx !== -1) {
+    if (defaultIdx + 1 >= args.length) {
+      throw new GSDError('Usage: config-get <key.path> [--default <value>]', ErrorClassification.Validation);
+    }
+    defaultValue = String(args[defaultIdx + 1]);
+    filteredArgs = [...args.slice(0, defaultIdx), ...args.slice(defaultIdx + 2)];
   }
 
-  const paths = planningPaths(projectDir);
+  const keyPath = filteredArgs[0];
+  if (!keyPath) {
+    throw new GSDError('Usage: config-get <key.path> [--default <value>]', ErrorClassification.Validation);
+  }
+
+  const paths = planningPaths(projectDir, workstream);
   let raw: string;
   try {
     raw = await readFile(paths.config, 'utf-8');
@@ -104,12 +117,16 @@ export const configGet: QueryHandler = async (args, projectDir) => {
   let current: unknown = config;
   for (const key of keys) {
     if (current === undefined || current === null || typeof current !== 'object') {
-      throw new GSDError(`Key not found: ${keyPath}`, ErrorClassification.Validation);
+      // UNIX convention (cf. `git config --get`): missing key exits 1, not 10.
+      // See issue #2544 — callers use `if ! gsd-sdk query config-get k; then` patterns.
+      if (defaultValue !== undefined) return { data: defaultValue };
+      throw new GSDError(`Key not found: ${keyPath}`, ErrorClassification.Execution);
     }
     current = (current as Record<string, unknown>)[key];
   }
   if (current === undefined) {
-    throw new GSDError(`Key not found: ${keyPath}`, ErrorClassification.Validation);
+    if (defaultValue !== undefined) return { data: defaultValue };
+    throw new GSDError(`Key not found: ${keyPath}`, ErrorClassification.Execution);
   }
 
   return { data: current };
@@ -127,8 +144,8 @@ export const configGet: QueryHandler = async (args, projectDir) => {
  * @param projectDir - Project root directory
  * @returns QueryResult with `{ path: string }` absolute or project-relative resolution via planningPaths
  */
-export const configPath: QueryHandler = async (_args, projectDir) => {
-  const paths = planningPaths(projectDir);
+export const configPath: QueryHandler = async (_args, projectDir, workstream) => {
+  const paths = planningPaths(projectDir, workstream);
   return { data: { path: paths.config } };
 };
 
@@ -142,16 +159,18 @@ export const configPath: QueryHandler = async (_args, projectDir) => {
  *
  * @param args - args[0] is the agent type (e.g., 'gsd-planner')
  * @param projectDir - Project root directory
+ * @param workstream - Optional workstream name; forwarded to loadConfig so per-workstream
+ *   model_profile settings are respected (mirrors configGet/configPath behavior)
  * @returns QueryResult with { model, profile } or { model, profile, unknown_agent: true }
  * @throws GSDError with Validation classification if agent type not provided
  */
-export const resolveModel: QueryHandler = async (args, projectDir) => {
+export const resolveModel: QueryHandler = async (args, projectDir, workstream) => {
   const agentType = args[0];
   if (!agentType) {
     throw new GSDError('agent-type required', ErrorClassification.Validation);
   }
 
-  const config = await loadConfig(projectDir);
+  const config = await loadConfig(projectDir, workstream);
   const profile = String(config.model_profile || 'balanced').toLowerCase();
 
   // Check per-agent override first

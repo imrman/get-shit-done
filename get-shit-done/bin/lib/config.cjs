@@ -4,13 +4,15 @@
 
 const fs = require('fs');
 const path = require('path');
-const { output, error, planningDir, withPlanningLock, CONFIG_DEFAULTS, atomicWriteFileSync } = require('./core.cjs');
+const { output, error, CONFIG_DEFAULTS, atomicWriteFileSync } = require('./core.cjs');
+const { planningDir, withPlanningLock } = require('./planning-workspace.cjs');
 const {
   VALID_PROFILES,
   getAgentToModelMapForProfile,
   formatAgentToModelMapAsTable,
 } = require('./model-profiles.cjs');
 const { VALID_CONFIG_KEYS, isValidConfigKey } = require('./config-schema.cjs');
+const { isSecretKey, maskSecret } = require('./secrets.cjs');
 
 const CONFIG_KEY_SUGGESTIONS = {
   'workflow.nyquist_validation_enabled': 'workflow.nyquist_validation',
@@ -24,6 +26,8 @@ const CONFIG_KEY_SUGGESTIONS = {
   'workflow.code_review_level': 'workflow.code_review_depth',
   'workflow.review_depth': 'workflow.code_review_depth',
   'review.model': 'review.models.<cli-name>',
+  'sub_repos': 'planning.sub_repos',
+  'plan_checker': 'workflow.plan_check',
 };
 
 function validateKnownConfigKeyPath(keyPath) {
@@ -117,6 +121,7 @@ function buildNewProjectConfig(userChoices) {
       plan_bounce_script: null,
       plan_bounce_passes: 2,
       auto_prune_state: false,
+      post_planning_gaps: CONFIG_DEFAULTS.post_planning_gaps,
       security_enforcement: CONFIG_DEFAULTS.security_enforcement,
       security_asvs_level: CONFIG_DEFAULTS.security_asvs_level,
       security_block_on: CONFIG_DEFAULTS.security_block_on,
@@ -331,7 +336,44 @@ function cmdConfigSet(cwd, keyPath, value, raw) {
     error(`Invalid context value '${value}'. Valid values: ${VALID_CONTEXT_VALUES.join(', ')}`);
   }
 
+  // Codebase drift detector (#2003)
+  const VALID_DRIFT_ACTIONS = ['warn', 'auto-remap'];
+  if (keyPath === 'workflow.drift_action' && !VALID_DRIFT_ACTIONS.includes(String(parsedValue))) {
+    error(`Invalid workflow.drift_action '${value}'. Valid values: ${VALID_DRIFT_ACTIONS.join(', ')}`);
+  }
+  if (keyPath === 'workflow.drift_threshold') {
+    if (typeof parsedValue !== 'number' || !Number.isInteger(parsedValue) || parsedValue < 1) {
+      error(`Invalid workflow.drift_threshold '${value}'. Must be a positive integer.`);
+    }
+  }
+
+  // Post-planning gap checker (#2493)
+  if (keyPath === 'workflow.post_planning_gaps') {
+    if (typeof parsedValue !== 'boolean') {
+      error(`Invalid workflow.post_planning_gaps '${value}'. Must be a boolean (true or false).`);
+    }
+  }
+
   const setConfigValueResult = setConfigValue(cwd, keyPath, parsedValue);
+
+  // Mask secrets in both JSON and text output. The plaintext is written
+  // to config.json (that's where secrets live on disk); the CLI output
+  // must never echo it. See lib/secrets.cjs.
+  if (isSecretKey(keyPath)) {
+    const masked = maskSecret(parsedValue);
+    const maskedPrev = setConfigValueResult.previousValue === undefined
+      ? undefined
+      : maskSecret(setConfigValueResult.previousValue);
+    const maskedResult = {
+      ...setConfigValueResult,
+      value: masked,
+      previousValue: maskedPrev,
+      masked: true,
+    };
+    output(maskedResult, raw, `${keyPath}=${masked}`);
+    return;
+  }
+
   output(setConfigValueResult, raw, `${keyPath}=${parsedValue}`);
 }
 
@@ -372,6 +414,14 @@ function cmdConfigGet(cwd, keyPath, raw, defaultValue) {
   if (current === undefined) {
     if (hasDefault) { output(defaultValue, raw, String(defaultValue)); return; }
     error(`Key not found: ${keyPath}`);
+  }
+
+  // Never echo plaintext for sensitive keys via config-get. Plaintext lives
+  // in config.json on disk; the CLI surface always shows the masked form.
+  if (isSecretKey(keyPath)) {
+    const masked = maskSecret(current);
+    output(masked, raw, masked);
+    return;
   }
 
   output(current, raw, String(current));

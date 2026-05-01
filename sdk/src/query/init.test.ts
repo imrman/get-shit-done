@@ -351,6 +351,40 @@ describe('initPlanPhase', () => {
     const data = result.data as Record<string, unknown>;
     expect(data.error).toBeDefined();
   });
+
+  // #2769: extractReqIds must accept all bold/colon variants of the
+  // Requirements header. The forms render identically in markdown but differ
+  // textually; the previous regex only matched **Requirements**: (colon
+  // outside bold) and silently returned null for **Requirements:** (colon
+  // inside bold) and **Requirements** : (spaced).
+  describe.each([
+    { name: 'colon inside bold', header: '**Requirements:** RV-01, RV-02' },
+    { name: 'colon outside bold', header: '**Requirements**: RV-01, RV-02' },
+    { name: 'space before colon', header: '**Requirements** : RV-01, RV-02' },
+  ])('phase_req_ids extraction (#2769)', ({ name, header }) => {
+    it(`parses Requirements header with ${name}`, async () => {
+      // Overwrite ROADMAP.md so phase 9 carries the variant header.
+      await writeFile(join(tmpDir, '.planning', 'ROADMAP.md'), [
+        '# Roadmap',
+        '',
+        '## v3.0: SDK-First Migration',
+        '',
+        '### Phase 9: Foundation',
+        '',
+        '**Goal:** Build foundation',
+        header,
+        '',
+        '### Phase 10: Read-Only Queries',
+        '',
+        '**Goal:** Implement queries',
+        '',
+      ].join('\n'));
+
+      const result = await initPlanPhase(['9'], tmpDir);
+      const data = result.data as Record<string, unknown>;
+      expect(data.phase_req_ids).toBe('RV-01, RV-02');
+    });
+  });
 });
 
 describe('initNewMilestone', () => {
@@ -446,6 +480,51 @@ describe('initMilestoneOp', () => {
     expect(data.phase_count).toBeGreaterThanOrEqual(0);
     expect(data.completed_phases).toBeGreaterThanOrEqual(0);
     expect(data.project_root).toBe(tmpDir);
+  });
+
+  // Regression: #2633 — ROADMAP.md is the authority for current-milestone
+  // phase count, not on-disk phase directories. After `phases clear` a new
+  // milestone's roadmap may list phases 3/4/5 while only 03 and 04 exist on
+  // disk yet. Deriving phase_count from disk yields 2 and falsely flags
+  // all_phases_complete=true once both on-disk phases have summaries.
+  it('derives phase_count from ROADMAP current milestone, not on-disk dirs (#2633)', async () => {
+    // Custom fixture overriding the shared beforeEach: simulate post-cleanup
+    // start of v1.1 where roadmap declares phases 3, 4, 5 but only 03 and 04
+    // have been materialized on disk (both with summaries).
+    const fresh = await mkdtemp(join(tmpdir(), 'gsd-init-2633-'));
+    try {
+      await mkdir(join(fresh, '.planning', 'phases', '03-alpha'), { recursive: true });
+      await mkdir(join(fresh, '.planning', 'phases', '04-beta'), { recursive: true });
+      await writeFile(join(fresh, '.planning', 'config.json'), JSON.stringify({
+        model_profile: 'balanced',
+        workflow: { nyquist_validation: true },
+      }));
+      await writeFile(join(fresh, '.planning', 'STATE.md'), [
+        '---', 'milestone: v1.1', 'milestone_name: Next', 'status: executing', '---', '',
+      ].join('\n'));
+      await writeFile(join(fresh, '.planning', 'ROADMAP.md'), [
+        '# Roadmap', '',
+        '## v1.1: Next',
+        '',
+        '### Phase 3: Alpha', '**Goal:** A', '',
+        '### Phase 4: Beta', '**Goal:** B', '',
+        '### Phase 5: Gamma', '**Goal:** C', '',
+      ].join('\n'));
+      // Both on-disk phases have summaries (completed).
+      await writeFile(join(fresh, '.planning', 'phases', '03-alpha', '03-01-SUMMARY.md'), '# S');
+      await writeFile(join(fresh, '.planning', 'phases', '04-beta', '04-01-SUMMARY.md'), '# S');
+
+      const result = await initMilestoneOp([], fresh);
+      const data = result.data as Record<string, unknown>;
+      // Roadmap declares 3 phases for the current milestone.
+      expect(data.phase_count).toBe(3);
+      // Only 2 are materialized + summarized on disk.
+      expect(data.completed_phases).toBe(2);
+      // Therefore milestone is NOT complete — phase 5 is still outstanding.
+      expect(data.all_phases_complete).toBe(false);
+    } finally {
+      await rm(fresh, { recursive: true, force: true });
+    }
   });
 });
 

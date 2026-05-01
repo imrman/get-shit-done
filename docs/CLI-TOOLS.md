@@ -452,9 +452,10 @@ User-facing entry point: `/gsd-graphify` (see [Command Reference](COMMANDS.md#gs
 
 | Module | File | Exports |
 |--------|------|---------|
-| Core | `lib/core.cjs` | `error()`, `output()`, `parseArgs()`, shared utilities |
+| Core | `lib/core.cjs` | `error()`, `output()`, `parseArgs()`, shared utilities, compatibility re-exports |
 | State | `lib/state.cjs` | All `state` subcommands, `state-snapshot` |
 | Phase | `lib/phase.cjs` | Phase CRUD, `find-phase`, `phase-plan-index`, `phases list` |
+| Planning Workspace | `lib/planning-workspace.cjs` | Planning seam: `planningDir`, `planningPaths`, active workstream routing, `.planning/.lock` |
 | Roadmap | `lib/roadmap.cjs` | Roadmap parsing, phase extraction, progress updates |
 | Config | `lib/config.cjs` | Config read/write, section initialization |
 | Verify | `lib/verify.cjs` | All verification and validation commands |
@@ -475,8 +476,27 @@ User-facing entry point: `/gsd-graphify` (see [Command Reference](COMMANDS.md#gs
 
 ---
 
+## Reviewer CLI Routing
+
+`review.models.<cli>` maps a reviewer flavor to a shell command invoked by the code-review workflow. Set via [`/gsd-settings-integrations`](COMMANDS.md#gsd-settings-integrations) or directly:
+
+```bash
+gsd-sdk query config-set review.models.codex    "codex exec --model gpt-5"
+gsd-sdk query config-set review.models.gemini   "gemini -m gemini-2.5-pro"
+gsd-sdk query config-set review.models.opencode "opencode run --model claude-sonnet-4"
+gsd-sdk query config-set review.models.claude   ""   # clear — fall back to session model
+```
+
+Slugs are validated against `[a-zA-Z0-9_-]+`; empty or path-containing slugs are rejected. See [`docs/CONFIGURATION.md`](CONFIGURATION.md#code-review-cli-routing) for the full field reference.
+
+## Secret Handling
+
+API keys configured via `/gsd-settings-integrations` (`brave_search`, `firecrawl`, `exa_search`) are written plaintext to `.planning/config.json` but are masked (`****<last-4>`) in every `config-set` / `config-get` output, confirmation table, and interactive prompt. See `get-shit-done/bin/lib/secrets.cjs` for the masking implementation. The `config.json` file itself is the security boundary — protect it with filesystem permissions and keep it out of git (`.planning/` is gitignored by default).
+
+---
+
 ## See also
 
 - [sdk/src/query/QUERY-HANDLERS.md](../sdk/src/query/QUERY-HANDLERS.md) — registry matrix, routing, golden parity, intentional CJS differences
 - [Architecture](ARCHITECTURE.md) — where `gsd-sdk query` fits in orchestration
-- [Command Reference](COMMANDS.md) — user-facing `/gsd:` commands
+- [Command Reference](COMMANDS.md) — user-facing `/gsd-` commands

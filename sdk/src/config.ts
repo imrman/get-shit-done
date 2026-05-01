@@ -6,6 +6,7 @@
  */
 
 import { readFile } from 'node:fs/promises';
+import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { relPlanningPath } from './workstream-utils.js';
 
@@ -38,6 +39,13 @@ export interface WorkflowConfig {
   max_discuss_passes: number;
   /** Subagent timeout in ms (matches `get-shit-done/bin/lib/core.cjs` default 300000). */
   subagent_timeout: number;
+  /**
+   * Issue #2492. When true (default), enforces that every trackable decision in
+   * CONTEXT.md `<decisions>` is referenced by at least one plan (translation
+   * gate, blocking) and reports decisions not honored by shipped artifacts at
+   * verify-phase (validation gate, non-blocking). Set false to disable both.
+   */
+  context_coverage_gate: boolean;
 }
 
 export interface HooksConfig {
@@ -98,6 +106,7 @@ export const CONFIG_DEFAULTS: GSDConfig = {
     skip_discuss: false,
     max_discuss_passes: 3,
     subagent_timeout: 300000,
+    context_coverage_gate: true,
   },
   hooks: {
     context_warnings: true,
@@ -112,33 +121,76 @@ export const CONFIG_DEFAULTS: GSDConfig = {
 
 /**
  * Load project config from `.planning/config.json`, merging with defaults.
- * Returns full defaults when file is missing or empty.
+ * When project config is missing or empty, layers user defaults
+ * (`~/.gsd/defaults.json`) over built-in defaults.
  * Throws on malformed JSON with a helpful error message.
  */
+/**
+ * Read user-level defaults from `~/.gsd/defaults.json` (or `$GSD_HOME/.gsd/`
+ * when set). Returns `{}` when the file is missing, empty, or malformed —
+ * matches CJS behavior in `get-shit-done/bin/lib/core.cjs` (#1683, #2652).
+ */
+async function loadUserDefaults(): Promise<Record<string, unknown>> {
+  const home = process.env.GSD_HOME || homedir();
+  const defaultsPath = join(home, '.gsd', 'defaults.json');
+  let raw: string;
+  try {
+    raw = await readFile(defaultsPath, 'utf-8');
+  } catch {
+    return {};
+  }
+  const trimmed = raw.trim();
+  if (trimmed === '') return {};
+  try {
+    const parsed = JSON.parse(trimmed);
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+      return {};
+    }
+    return parsed as Record<string, unknown>;
+  } catch {
+    return {};
+  }
+}
+
 export async function loadConfig(projectDir: string, workstream?: string): Promise<GSDConfig> {
   const configPath = join(projectDir, relPlanningPath(workstream), 'config.json');
   const rootConfigPath = join(projectDir, '.planning', 'config.json');
 
   let raw: string;
+  let projectConfigFound = false;
   try {
     raw = await readFile(configPath, 'utf-8');
+    projectConfigFound = true;
   } catch {
     // If workstream config missing, fall back to root config
     if (workstream) {
       try {
         raw = await readFile(rootConfigPath, 'utf-8');
+        projectConfigFound = true;
       } catch {
-        return structuredClone(CONFIG_DEFAULTS);
+        raw = '';
       }
     } else {
-      // File missing — normal for new projects
-      return structuredClone(CONFIG_DEFAULTS);
+      raw = '';
     }
+  }
+
+  // Pre-project context: no .planning/config.json exists. Layer user-level
+  // defaults from ~/.gsd/defaults.json over built-in defaults. Mirrors the
+  // CJS fall-back branch in get-shit-done/bin/lib/core.cjs:421 (#1683) so
+  // SDK-dispatched init queries (e.g. resolveModel in Codex installs, #2652)
+  // honor user-level knobs like `resolve_model_ids: "omit"`.
+  if (!projectConfigFound) {
+    const userDefaults = await loadUserDefaults();
+    return mergeDefaults(userDefaults);
   }
 
   const trimmed = raw.trim();
   if (trimmed === '') {
-    return structuredClone(CONFIG_DEFAULTS);
+    // Empty project config — treat as no project config (CJS core.cjs
+    // catches JSON.parse on empty and falls through to the pre-project path).
+    const userDefaults = await loadUserDefaults();
+    return mergeDefaults(userDefaults);
   }
 
   let parsed: Record<string, unknown>;
@@ -153,7 +205,12 @@ export async function loadConfig(projectDir: string, workstream?: string): Promi
     throw new Error(`Config at ${configPath} must be a JSON object`);
   }
 
-  // Three-level deep merge: defaults <- parsed
+  // Project config exists — user-level defaults are ignored (CJS parity).
+  // `buildNewProjectConfig` already baked them into config.json at /gsd:new-project.
+  return mergeDefaults(parsed);
+}
+
+function mergeDefaults(parsed: Record<string, unknown>): GSDConfig {
   return {
     ...structuredClone(CONFIG_DEFAULTS),
     ...parsed,

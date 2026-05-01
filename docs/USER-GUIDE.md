@@ -6,6 +6,7 @@ A detailed reference for workflows, troubleshooting, and configuration. For quic
 
 ## Table of Contents
 
+- [End-to-End Walkthrough](#end-to-end-walkthrough)
 - [Workflow Diagrams](#workflow-diagrams)
 - [UI Design Contract](#ui-design-contract)
 - [Spiking & Sketching](#spiking--sketching)
@@ -16,6 +17,241 @@ A detailed reference for workflows, troubleshooting, and configuration. For quic
 - [Usage Examples](#usage-examples)
 - [Troubleshooting](#troubleshooting)
 - [Recovery Quick Reference](#recovery-quick-reference)
+
+---
+
+## End-to-End Walkthrough
+
+This walkthrough shows how GSD phases connect for a typical single-phase project — a small Node.js REST API that validates webhook signatures. Follow it to understand what each command does, what it creates, and how the next command consumes it.
+
+### 1. Create the project
+
+```
+/gsd-new-project
+```
+
+GSD asks questions about your idea, spawns parallel research agents, extracts requirements, and creates a roadmap. You approve the roadmap before any code is written.
+
+**Example output (abridged):**
+
+```
+> What are you building?
+  A webhook signature validator middleware for Express apps.
+
+> Who's the user?
+  Backend developers integrating third-party webhooks (Stripe, GitHub, Shopify).
+
+[Research agents run in parallel...]
+[Requirements extracted...]
+
+Roadmap (1 phase):
+  Phase 1 — Core middleware: HMAC-SHA256 signature validation,
+             timing-safe compare, configurable tolerance window.
+
+Approve? [y/n]
+```
+
+**What gets created:**
+
+```
+.planning/
+  PROJECT.md          # "Webhook validator middleware — Express, HMAC-SHA256..."
+  REQUIREMENTS.md     # REQ-001: Validate signature header; REQ-002: Timing-safe...
+  ROADMAP.md          # Phase 1 status: pending
+  STATE.md            # Session memory, current position
+```
+
+`ROADMAP.md` excerpt:
+```markdown
+## Phase 1 — Core middleware
+**Status:** pending
+**Goal:** HMAC-SHA256 signature validation with timing-safe compare and a
+configurable replay-protection tolerance window.
+**Requirements:** REQ-001, REQ-002, REQ-003
+```
+
+### 2. Discuss and plan the phase
+
+```
+/gsd-discuss-phase 1
+```
+
+GSD reads the phase goal and asks about your implementation preferences before any planning happens. This is where you shape *how* it builds — not just *what* it builds.
+
+```
+> How should invalid signatures be handled?
+  Reject immediately with 401, log the raw header for debugging.
+
+> Should the tolerance window be configurable per-route or global?
+  Global config, but allow per-route override via middleware options.
+
+> Any library preferences for HMAC?
+  Node built-in crypto only — no extra dependencies.
+```
+
+**What gets created:** `.planning/phases/01-core-middleware/CONTEXT.md`
+
+`CONTEXT.md` excerpt:
+```markdown
+## Implementation Decisions
+- Invalid signatures → 401, log raw header
+- Tolerance window → global default, per-route override via options object
+- HMAC library → Node built-in crypto (no external deps)
+- Error format → { error: "invalid_signature", ts: <epoch> }
+```
+
+Now plan the phase:
+
+```
+/gsd-plan-phase 1
+```
+
+GSD spawns four parallel research agents (stack, features, architecture, pitfalls), then a planner reads `CONTEXT.md` + research findings and creates atomic task plans. A plan-checker verifies each plan achieves the phase goal before saving.
+
+**What gets created:**
+
+```
+.planning/phases/01-core-middleware/
+  RESEARCH.md         # Findings: crypto.timingSafeEqual docs, replay attack patterns...
+  01-01-PLAN.md       # Task: create validateSignature() core function
+  01-02-PLAN.md       # Task: Express middleware wrapper + error handling
+```
+
+`01-01-PLAN.md` excerpt:
+```xml
+<task type="auto">
+  <name>Create validateSignature core function</name>
+  <files>src/validate.js, src/validate.test.js</files>
+  <action>
+    Use crypto.createHmac('sha256', secret).update(rawBody).digest('hex').
+    Compare with crypto.timingSafeEqual() — never === or ==.
+    Accept tolerance window in ms; reject if |timestamp - now| exceeds it.
+  </action>
+  <verify>npm test -- --grep "validateSignature"</verify>
+  <done>All timing-safe comparison tests pass; replay outside window returns false</done>
+</task>
+```
+
+### 3. Execute
+
+```
+/gsd-execute-phase 1
+```
+
+GSD groups plans into waves (parallel where independent, sequential where dependent), spawns a fresh 200k-context executor per plan, and commits each task atomically.
+
+```
+Wave 1 (parallel):
+  [Executor A] → 01-01-PLAN.md (core function)  ✓ committed
+  [Executor B] → 01-02-PLAN.md (middleware)      ✓ committed
+
+[Verifier] Checking codebase against phase goals...
+  REQ-001 validateSignature() ✓
+  REQ-002 timing-safe compare ✓
+  REQ-003 tolerance window    ✓
+  Status: PASS
+```
+
+**Git history after execution:**
+
+```
+a1b2c3d feat(01-01): implement validateSignature with timingSafeEqual
+d4e5f6g feat(01-02): add Express middleware wrapper and 401 error format
+h7i8j9k chore(01): phase 1 verification — all requirements met
+```
+
+**What gets created:**
+
+```
+.planning/phases/01-core-middleware/
+  01-01-SUMMARY.md    # "Implemented validateSignature(), 47 lines, tests passing"
+  01-02-SUMMARY.md    # "Middleware wraps validator, logs raw header on 401"
+  VERIFICATION.md     # REQ-001 ✓, REQ-002 ✓, REQ-003 ✓ — PASS
+```
+
+`STATE.md` is updated automatically to reflect the new phase status:
+
+```markdown
+## Current Position
+Phase 1 — Core middleware: executed, pending verify
+```
+
+### 4. Verify
+
+```
+/gsd-verify-work 1
+```
+
+GSD extracts testable deliverables from the phase goal and walks you through them one at a time.
+
+```
+[1/3] Can you require the middleware and pass it to an Express route?
+> yes
+
+[2/3] Does a request with a valid signature return 200?
+> yes
+
+[3/3] Does a request with an invalid signature return 401 with { error: "invalid_signature" }?
+> no — I'm getting a 500 instead
+
+[Diagnosing...]
+Root cause: middleware catches crypto.timingSafeEqual TypeError when
+buffers are different lengths. Fix: normalize to same length before compare.
+
+Fix plan created: .planning/phases/01-core-middleware/01-03-PLAN.md
+Run /gsd-execute-phase 1 to apply.
+```
+
+After re-running execute and re-verifying:
+
+```
+All 3 checks passed. Phase 1 verified.
+```
+
+**What gets created:** `.planning/phases/01-core-middleware/UAT.md`
+
+### What's next
+
+Once a phase is verified, ship it:
+
+```
+/gsd-ship 1          # Creates a PR with auto-generated body
+```
+
+For multi-phase projects, repeat the loop:
+
+```
+/gsd-discuss-phase 2
+/gsd-plan-phase 2
+/gsd-execute-phase 2
+/gsd-verify-work 2
+```
+
+Or let GSD figure out the next step automatically:
+
+```
+/gsd-next
+```
+
+When all phases are done:
+
+```
+/gsd-audit-milestone     # Verify all requirements shipped
+/gsd-complete-milestone  # Archive, tag release
+```
+
+**Relevant flags covered in this walkthrough:**
+
+| Flag | Command | When to use |
+| ---- | ------- | ----------- |
+| `--auto` | `/gsd-new-project` | Skip interactive questions, ingest from a PRD file |
+| `--research` | `/gsd-quick` | Add a research agent to an ad-hoc task |
+| `--validate` | `/gsd-quick` | Add plan-checking and post-execution verification |
+| `--chain` | `/gsd-discuss-phase` | Auto-chain discuss → plan → execute without stopping |
+| `--skip-research` | `/gsd-plan-phase` | Skip research agents when the domain is already familiar |
+| `--draft` | `/gsd-ship` | Create a draft PR instead of a ready-for-review one |
+
+For the full command reference with all flags, see [`docs/COMMANDS.md`](COMMANDS.md). For configuration options (model profiles, workflow agents, git branching), see [`docs/CONFIGURATION.md`](CONFIGURATION.md).
 
 ---
 
@@ -178,6 +414,47 @@ By default, `/gsd-discuss-phase` asks open-ended questions about your implementa
 - Projects where patterns are well-established and predictable
 
 See [docs/workflow-discuss-mode.md](workflow-discuss-mode.md) for the full discuss-mode reference.
+
+### Decision Coverage Gates
+
+The discuss-phase captures implementation decisions in CONTEXT.md under a
+`<decisions>` block as numbered bullets (`- **D-01:** …`). Two gates — added
+for issue #2492 — ensure those decisions survive into plans and shipped
+code.
+
+**Plan-phase translation gate (blocking).** After planning, GSD refuses to
+mark the phase planned until every trackable decision appears in at least
+one plan's `must_haves`, `truths`, or body. The gate names each missed
+decision by id (`D-07: …`) so you know exactly what to add, move, or
+reclassify.
+
+**Verify-phase validation gate (non-blocking).** During verification, GSD
+searches plans, SUMMARY.md, modified files, and recent commit messages for
+each trackable decision. Misses are logged to VERIFICATION.md as a warning
+section; verification status is unchanged. The asymmetry is deliberate —
+the blocking gate is cheap at plan time but hostile at verify time.
+
+**Writing decisions the gate can match.** Two match modes:
+
+1. **Strict id match (recommended).** Cite the decision id anywhere in a
+   plan that implements it — `must_haves.truths: ["D-12: bit offsets
+   exposed"]`, a bullet in the plan body, a frontmatter comment. This is
+   deterministic and unambiguous.
+2. **Soft phrase match (fallback).** If a 6+-word slice of the decision
+   text appears verbatim in any plan or shipped artifact, it counts. This
+   forgives paraphrasing but is less reliable.
+
+**Opting a decision out.** If a decision genuinely should not be tracked —
+an implementation-discretion note, an informational capture, a decision
+already deferred — mark it one of these ways:
+
+- Move it under the `### Claude's Discretion` heading inside `<decisions>`.
+- Tag it in its bullet: `- **D-08 [informational]:** …`,
+  `- **D-09 [folded]:** …`, `- **D-10 [deferred]:** …`.
+
+**Disabling the gates.** Set
+`workflow.context_coverage_gate: false` in `.planning/config.json` (or via
+`/gsd-settings`) to skip both gates silently. Default is `true`.
 
 ---
 
@@ -585,6 +862,20 @@ claude --dangerously-skip-permissions
 # (normal phase workflow from here)
 ```
 
+**Post-execute drift detection (#2003).** After every `/gsd-execute-phase`,
+GSD checks whether the phase introduced enough structural change
+(new directories, barrel exports, migrations, or route modules) to make
+`.planning/codebase/STRUCTURE.md` stale. If it did, the default behavior is
+to print a one-shot warning suggesting the exact `/gsd-map-codebase --paths …`
+invocation to refresh just the affected subtrees. Flip the behavior with:
+
+```bash
+/gsd-settings workflow.drift_action auto-remap       # remap automatically
+/gsd-settings workflow.drift_threshold 5             # tune sensitivity
+```
+
+The gate is non-blocking: any internal failure logs and the phase continues.
+
 ### Quick Bug Fix
 
 ```bash
@@ -739,6 +1030,19 @@ To assign different models to different agents on a non-Claude runtime, add `mod
 ```
 
 The installer auto-configures `resolve_model_ids: "omit"` for Gemini CLI, OpenCode, Kilo, and Codex. If you're manually setting up a non-Claude runtime, add it to `.planning/config.json` yourself.
+
+#### Switching from Claude to Codex with one config change (#2517)
+
+If you want tiered models on Codex without writing a large `model_overrides` block, set `runtime: "codex"` and pick a profile:
+
+```json
+{
+  "runtime": "codex",
+  "model_profile": "balanced"
+}
+```
+
+GSD will resolve each agent's tier (`opus`/`sonnet`/`haiku`) to the Codex-native model and reasoning effort defined in the runtime tier map (`gpt-5.4` xhigh / `gpt-5.3-codex` medium / `gpt-5.4-mini` medium). The Codex installer embeds both `model` and `model_reasoning_effort` into each agent's TOML automatically. To override a single tier, add `model_profile_overrides.codex.<tier>`. See [Runtime-Aware Profiles](CONFIGURATION.md#runtime-aware-profiles-2517).
 
 See the [Configuration Reference](CONFIGURATION.md#non-claude-runtimes-codex-opencode-gemini-cli-kilo) for the full explanation.
 
@@ -993,4 +1297,3 @@ For reference, here is what GSD creates in your project:
       XX-UI-REVIEW.md     # Visual audit scores (from /gsd-ui-review)
   ui-reviews/             # Screenshots from /gsd-ui-review (gitignored)
 ```
-

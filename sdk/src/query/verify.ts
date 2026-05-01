@@ -133,13 +133,13 @@ export const verifyPlanStructure: QueryHandler = async (args, projectDir) => {
  * @returns QueryResult with { complete, phase, plan_count, summary_count, incomplete_plans, orphan_summaries, errors, warnings }
  * @throws GSDError with Validation classification if phase number missing
  */
-export const verifyPhaseCompleteness: QueryHandler = async (args, projectDir) => {
+export const verifyPhaseCompleteness: QueryHandler = async (args, projectDir, workstream) => {
   const phase = args[0];
   if (!phase) {
     throw new GSDError('phase required', ErrorClassification.Validation);
   }
 
-  const phasesDir = planningPaths(projectDir).phases;
+  const phasesDir = planningPaths(projectDir, workstream).phases;
   const normalized = normalizePhaseName(phase);
 
   // Find phase directory (mirror findPhase pattern from phase.ts)
@@ -554,7 +554,7 @@ export const verifyPathExists: QueryHandler = async (args, projectDir) => {
 /**
  * Detect schema drift for a phase — port of `cmdVerifySchemaDrift` from verify.cjs lines 1013–1086.
  */
-export const verifySchemaDrift: QueryHandler = async (args, projectDir) => {
+export const verifySchemaDrift: QueryHandler = async (args, projectDir, workstream) => {
   const phaseArg = args[0];
   const skipFlag = args.includes('--skip');
 
@@ -565,7 +565,7 @@ export const verifySchemaDrift: QueryHandler = async (args, projectDir) => {
   const { checkSchemaDrift } = await import('./schema-detect.js');
   const { execGit } = await import('./commit.js');
 
-  const phasesDir = planningPaths(projectDir).phases;
+  const phasesDir = planningPaths(projectDir, workstream).phases;
   if (!existsSync(phasesDir)) {
     return {
       data: {
@@ -642,4 +642,57 @@ export const verifySchemaDrift: QueryHandler = async (args, projectDir) => {
       skipped: result.skipped || false,
     },
   };
+};
+
+/**
+ * verify.codebase-drift — structural drift detector (#2003).
+ *
+ * Non-blocking by contract: every failure mode returns a successful response
+ * with `{ skipped: true, reason }`. The post-execute drift gate in
+ * `/gsd:execute-phase` relies on this guarantee.
+ *
+ * Delegates to the Node-side implementation in `bin/lib/drift.cjs` and
+ * `bin/lib/verify.cjs` via a child process so the drift logic stays in one
+ * canonical place (see `cmdVerifyCodebaseDrift`).
+ */
+export const verifyCodebaseDrift: QueryHandler = async (_args, projectDir) => {
+  try {
+    const { execFileSync } = await import('node:child_process');
+    const { fileURLToPath } = await import('node:url');
+    const { dirname, resolve } = await import('node:path');
+    const here = typeof __dirname === 'string'
+      ? __dirname
+      : dirname(fileURLToPath(import.meta.url));
+    // sdk/src/query -> ../../../get-shit-done/bin/gsd-tools.cjs
+    // sdk/dist/query -> ../../../get-shit-done/bin/gsd-tools.cjs
+    const toolsPath = resolve(here, '..', '..', '..', 'get-shit-done', 'bin', 'gsd-tools.cjs');
+    const out = execFileSync(process.execPath, [toolsPath, 'verify', 'codebase-drift'], {
+      cwd: projectDir,
+      encoding: 'utf-8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+    }).trim();
+    try {
+      return { data: JSON.parse(out) };
+    } catch {
+      return {
+        data: {
+          skipped: true,
+          reason: 'sdk-parse-failed',
+          action_required: false,
+          directive: 'none',
+          elements: [],
+        },
+      };
+    }
+  } catch (err) {
+    return {
+      data: {
+        skipped: true,
+        reason: 'sdk-exception: ' + (err instanceof Error ? err.message : String(err)),
+        action_required: false,
+        directive: 'none',
+        elements: [],
+      },
+    };
+  }
 };

@@ -802,6 +802,45 @@
 | `TESTING.md` | Test infrastructure, coverage, patterns |
 | `INTEGRATIONS.md` | External services, APIs, third-party dependencies |
 
+**Incremental remap — `--paths` (#2003):** The mapper accepts an optional
+`--paths <p1,p2,...>` scope hint. When provided, it restricts exploration
+to the listed repo-relative prefixes instead of scanning the whole tree.
+This is the pathway used by the post-execute codebase-drift gate to refresh
+only the subtrees the phase actually changed. Each produced document carries
+`last_mapped_commit` in its YAML frontmatter so drift can be measured
+against the mapping point, not HEAD.
+
+### 27a. Post-Execute Codebase Drift Detection
+
+**Introduced by:** #2003
+**Trigger:** Runs automatically at the end of every `/gsd-execute-phase`
+**Configuration:**
+- `workflow.drift_threshold` (integer, default `3`) — minimum new
+  structural elements before the gate acts.
+- `workflow.drift_action` (`warn` | `auto-remap`, default `warn`) —
+  warn-only or spawn `gsd-codebase-mapper` with `--paths` scoped to
+  affected subtrees.
+
+**What counts as drift:**
+- New directory outside mapped paths
+- New barrel export at `(packages|apps)/*/src/index.*`
+- New migration file (supabase/prisma/drizzle/src/migrations/…)
+- New route module under `routes/` or `api/`
+
+**Non-blocking guarantee:** any internal failure (missing STRUCTURE.md,
+git errors, mapper spawn failure) logs a single line and the phase
+continues. Drift detection cannot fail verification.
+
+**Requirements:**
+- REQ-DRIFT-01: System MUST detect the four drift categories from `git diff
+  --name-status last_mapped_commit..HEAD`
+- REQ-DRIFT-02: Action fires only when element count ≥ `workflow.drift_threshold`
+- REQ-DRIFT-03: `warn` action MUST NOT spawn any agent
+- REQ-DRIFT-04: `auto-remap` action MUST pass sanitized `--paths` to the mapper
+- REQ-DRIFT-05: Detection/remap failure MUST be non-blocking for `/gsd-execute-phase`
+- REQ-DRIFT-06: `last_mapped_commit` round-trip through YAML frontmatter
+  on each `.planning/codebase/*.md` file
+
 ---
 
 ## Utility Features
@@ -1752,6 +1791,7 @@ Test suite that scans all agent, workflow, and command files for embedded inject
 - REQ-CTXRED-01: System MUST truncate oversized markdown artifacts to fit within context budgets
 - REQ-CTXRED-02: System MUST order prompts for cache-friendly assembly (stable prefixes first)
 - REQ-CTXRED-03: Reduction MUST preserve essential information (headings, requirements, task structure)
+- REQ-CTXRED-04: Skill `description:` fields MUST be ≤ 100 chars; enforced by `npm run lint:descriptions` (see `scripts/lint-descriptions.cjs` and `tests/enh-2789-description-budget.test.cjs`)
 
 **Process:**
 1. **Measure** — Calculate total prompt size for the workflow
