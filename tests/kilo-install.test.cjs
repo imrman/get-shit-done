@@ -225,12 +225,29 @@ describe('Source code integration (Kilo)', () => {
   });
 
   test('promptRuntime runtimeMap has Kilo as option 11', () => {
-    assert.ok(src.includes("'11': 'kilo'"), 'runtimeMap has 11 -> kilo');
+    // Structural assertion against exported runtimeMap rather than source-grep.
+    process.env.GSD_TEST_MODE = '1';
+    delete require.cache[require.resolve(path.join(__dirname, '..', 'bin', 'install.js'))];
+    const { runtimeMap } = require(path.join(__dirname, '..', 'bin', 'install.js'));
+    assert.strictEqual(runtimeMap['11'], 'kilo', 'runtimeMap has 11 -> kilo');
   });
 
   test('prompt text shows Kilo above OpenCode without marketing copy', () => {
-    assert.ok(src.includes('11${reset}) Kilo'), 'prompt lists Kilo as option 11');
-    assert.ok(!src.includes('the #1 AI coding platform on OpenRouter'), 'prompt does not include marketing tagline');
+    // Call the exported prompt builder; assert against rendered text, not raw source.
+    process.env.GSD_TEST_MODE = '1';
+    delete require.cache[require.resolve(path.join(__dirname, '..', 'bin', 'install.js'))];
+    const { buildRuntimePromptText } = require(path.join(__dirname, '..', 'bin', 'install.js'));
+    const promptText = buildRuntimePromptText();
+    // Strip ANSI color codes so assertions don't depend on terminal escapes.
+    // eslint-disable-next-line no-control-regex
+    const plain = promptText.replace(/\x1b\[[0-9;]*m/g, '');
+    assert.ok(/\b11\)\s*Kilo\b/.test(plain), 'prompt lists Kilo as option 11');
+    const kiloIdx = plain.indexOf('11) Kilo');
+    const opencodeIdx = plain.indexOf('OpenCode');
+    assert.ok(kiloIdx > -1 && opencodeIdx > -1 && kiloIdx < opencodeIdx,
+      'Kilo appears above OpenCode in prompt');
+    assert.ok(!plain.includes('the #1 AI coding platform on OpenRouter'),
+      'prompt does not include marketing tagline');
   });
 
   test('hooks are skipped for Kilo', () => {
