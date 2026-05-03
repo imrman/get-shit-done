@@ -2,6 +2,7 @@ import { execFile } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import { extractField } from './registry.js';
 import type { QueryDispatchResult } from './query-dispatch-contract.js';
+import { mapFallbackDispatchError, toDispatchFailure } from './query-dispatch-error-mapper.js';
 
 interface CjsFallbackQueryResult {
   mode: 'json' | 'text';
@@ -99,14 +100,16 @@ export async function runCjsFallbackDispatch(input: RunCjsFallbackDispatchInput)
     const fallback = await runCjsFallbackQuery(projectDir, gsdToolsPath, normCmd, normArgs, ws);
     if (fallback.stderr.trim()) stderr.push(fallback.stderr.trimEnd());
     return {
+      ok: true,
       stderr,
-      stdout: formatFallbackOutput(fallback.output, fallback.mode, pickField),
+      stdout: formatFallbackOutput(fallback.output, fallback.mode, pickField) ?? '',
+      exit_code: 0,
     };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    return {
+    return toDispatchFailure(
+      mapFallbackDispatchError(msg, normCmd, normArgs),
       stderr,
-      error: { code: 1, message: `Error: gsd-tools.cjs fallback failed: ${msg}` },
-    };
+    );
   }
 }

@@ -4,7 +4,8 @@ import { normalizeQueryCommand } from './normalize-query-command.js';
 import { explainQueryCommandNoMatch, resolveQueryCommand, type QueryCommandResolution } from './command-resolution.js';
 import { runCjsFallbackDispatch } from './query-fallback-executor.js';
 import type { QueryResult } from './utils.js';
-import type { QueryDispatchError, QueryDispatchResult } from './query-dispatch-contract.js';
+import type { QueryDispatchResult, QueryDispatchErrorKind } from './query-dispatch-contract.js';
+import { mapNativeDispatchError, toDispatchFailure } from './query-dispatch-error-mapper.js';
 
 export interface QueryDispatchDeps {
   registry: QueryRegistry;
@@ -21,6 +22,20 @@ interface DispatchPlan {
   mode: DispatchMode;
   normalized: { command: string; args: string[]; tokens: string[] };
   matched: QueryCommandResolution | null;
+}
+
+function fail(
+  kind: QueryDispatchErrorKind,
+  code: number,
+  message: string,
+  details?: Record<string, unknown>,
+  stderr: string[] = [],
+): QueryDispatchResult {
+  return toDispatchFailure({ kind, code, message, details }, stderr);
+}
+
+function success(stdout: string, stderr: string[] = []): QueryDispatchResult {
+  return { ok: true, stdout, stderr, exit_code: 0 };
 }
 
 function planQueryDispatch(queryArgv: string[], registry: QueryRegistry, cjsFallbackEnabled: boolean): DispatchPlan {
@@ -41,14 +56,14 @@ function planQueryDispatch(queryArgv: string[], registry: QueryRegistry, cjsFall
   return { mode: 'error', normalized: { command: normCmd, args: normArgs, tokens: normalizedTokens }, matched: null };
 }
 
-function extractPick(queryArgv: string[]): { queryArgs: string[]; pickField?: string; error?: QueryDispatchError } {
+function extractPick(queryArgv: string[]): { queryArgs: string[]; pickField?: string; error?: QueryDispatchResult } {
   const queryArgs = [...queryArgv];
   const pickIdx = queryArgs.indexOf('--pick');
   if (pickIdx === -1) return { queryArgs };
   if (pickIdx + 1 >= queryArgs.length) {
     return {
       queryArgs,
-      error: { code: 10, message: 'Error: --pick requires a field name' },
+      error: fail('validation_error', 10, 'Error: --pick requires a field name', { field: '--pick', reason: 'missing_value' }),
     };
   }
   const pickField = queryArgs[pickIdx + 1];
@@ -68,11 +83,11 @@ function formatOutput(data: unknown, format: QueryResult['format'], pickField?: 
 
 export async function runQueryDispatch(deps: QueryDispatchDeps, queryArgv: string[]): Promise<QueryDispatchResult> {
   const picked = extractPick(queryArgv);
-  if (picked.error) return { stderr: [], error: picked.error };
+  if (picked.error) return picked.error;
 
   const { queryArgs, pickField } = picked;
   if (queryArgs.length === 0 || !queryArgs[0]) {
-    return { stderr: [], error: { code: 10, message: 'Error: "gsd-sdk query" requires a command' } };
+    return fail('validation_error', 10, 'Error: "gsd-sdk query" requires a command', { reason: 'missing_command' });
   }
 
   const plan = planQueryDispatch(queryArgs, deps.registry, deps.cjsFallbackEnabled);
@@ -80,46 +95,47 @@ export async function runQueryDispatch(deps: QueryDispatchDeps, queryArgv: strin
   const normArgs = plan.normalized.args;
 
   if (!normCmd || !String(normCmd).trim()) {
-    return { stderr: [], error: { code: 10, message: 'Error: "gsd-sdk query" requires a command' } };
+    return fail('validation_error', 10, 'Error: "gsd-sdk query" requires a command', { reason: 'empty_normalized_command' });
   }
 
   if (plan.mode === 'error') {
     const noMatch = queryArgs[0]
       ? explainQueryCommandNoMatch(queryArgs[0], queryArgs.slice(1), deps.registry)
       : null;
-    return {
-      stderr: [],
-      error: {
-        code: 10,
-        message: `Error: Unknown command: "${[normCmd, ...normArgs].join(' ')}". Use a registered \`gsd-sdk query\` subcommand (see sdk/src/query/QUERY-HANDLERS.md) or invoke \`node …/gsd-tools.cjs\` for CJS-only operations. CJS fallback is disabled (GSD_QUERY_FALLBACK=registered). To enable fallback, unset GSD_QUERY_FALLBACK or set it to a non-restricted value.${noMatch ? ` Attempted dotted: ${noMatch.attempted.dotted.slice(0, 2).join(' | ')}.` : ''}`,
-      },
-    };
+    return fail(
+      'unknown_command',
+      10,
+      `Error: Unknown command: "${[normCmd, ...normArgs].join(' ')}". Use a registered \`gsd-sdk query\` subcommand (see sdk/src/query/QUERY-HANDLERS.md) or invoke \`node …/gsd-tools.cjs\` for CJS-only operations. CJS fallback is disabled (GSD_QUERY_FALLBACK=registered). To enable fallback, unset GSD_QUERY_FALLBACK or set it to a non-restricted value.${noMatch ? ` Attempted dotted: ${noMatch.attempted.dotted.slice(0, 2).join(' | ')}.` : ''}`,
+      { normalized: [normCmd, ...normArgs].join(' '), attempted: noMatch?.attempted.dotted.slice(0, 2) ?? [] },
+    );
   }
 
   if (plan.mode === 'cjs') {
-    const gsdPath = deps.resolveGsdToolsPath(deps.projectDir);
-    return runCjsFallbackDispatch({
-      projectDir: deps.projectDir,
-      gsdToolsPath: gsdPath,
-      normCmd,
-      normArgs,
-      ws: deps.ws,
-      pickField,
-    });
+    try {
+      const gsdPath = deps.resolveGsdToolsPath(deps.projectDir);
+      return await runCjsFallbackDispatch({
+        projectDir: deps.projectDir,
+        gsdToolsPath: gsdPath,
+        normCmd,
+        normArgs,
+        ws: deps.ws,
+        pickField,
+      });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return fail('fallback_failure', 1, `Error: gsd-tools.cjs fallback failed: ${msg}`, {
+        command: normCmd,
+        args: normArgs,
+        backend: 'cjs',
+      });
+    }
   }
 
   const matched = plan.matched!;
   try {
     const result = await deps.dispatchNative(matched.cmd, matched.args);
-    return {
-      stderr: [],
-      stdout: formatOutput(result.data, result.format, pickField),
-    };
+    return success(formatOutput(result.data, result.format, pickField));
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    return {
-      stderr: [],
-      error: { code: 1, message: `Error: ${msg}` },
-    };
+    return toDispatchFailure(mapNativeDispatchError(e, matched.cmd, matched.args));
   }
 }

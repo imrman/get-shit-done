@@ -35,8 +35,10 @@ describe('runQueryDispatch', () => {
       dispatchNative: async () => ({ data: { ok: true } }),
     }, ['state', 'json']);
 
-    expect(out.error).toBeUndefined();
+    expect(out.ok).toBe(true);
+    if (!out.ok) throw new Error('expected success');
     expect(out.stdout).toBe('{\n  "ok": true\n}\n');
+    expect(out.exit_code).toBe(0);
   });
 
   it('applies --pick to native json output', async () => {
@@ -49,8 +51,10 @@ describe('runQueryDispatch', () => {
       dispatchNative: async () => ({ data: { nested: { value: 7 } } }),
     }, ['state', 'json', '--pick', 'nested.value']);
 
-    expect(out.error).toBeUndefined();
+    expect(out.ok).toBe(true);
+    if (!out.ok) throw new Error('expected success');
     expect(out.stdout).toBe('7\n');
+    expect(out.exit_code).toBe(0);
   });
 
   it('returns structured error for unknown command when fallback disabled', async () => {
@@ -63,9 +67,12 @@ describe('runQueryDispatch', () => {
       dispatchNative: async () => ({ data: {} }),
     }, ['unknown-cmd']);
 
-    expect(out.error?.code).toBe(10);
-    expect(out.error?.message).toContain('Unknown command: "unknown-cmd"');
-    expect(out.error?.message).toContain('Attempted dotted:');
+    expect(out.ok).toBe(false);
+    if (out.ok) throw new Error('expected failure');
+    expect(out.error.code).toBe(10);
+    expect(out.error.kind).toBe('unknown_command');
+    expect(out.error.message).toContain('Unknown command: "unknown-cmd"');
+    expect(out.error.message).toContain('Attempted dotted:');
   });
 
   it('runs cjs fallback and formats text mode', async () => {
@@ -79,9 +86,28 @@ describe('runQueryDispatch', () => {
       dispatchNative: async () => ({ data: {} }),
     }, ['unknown-cmd', '--help']);
 
-    expect(out.error).toBeUndefined();
+    expect(out.ok).toBe(true);
+    if (!out.ok) throw new Error('expected success');
     expect(out.stdout).toBe('USAGE: help text\n');
     expect(out.stderr[0]).toContain('falling back to gsd-tools.cjs');
+  });
+
+  it('returns structured fallback failure when resolveGsdToolsPath throws', async () => {
+    const registry = createRegistry();
+    const out = await runQueryDispatch({
+      registry,
+      projectDir: tmpDir,
+      cjsFallbackEnabled: true,
+      resolveGsdToolsPath: () => { throw new Error('path boom'); },
+      dispatchNative: async () => ({ data: {} }),
+    }, ['unknown-cmd']);
+
+    expect(out.ok).toBe(false);
+    if (out.ok) throw new Error('expected failure');
+    expect(out.error.kind).toBe('fallback_failure');
+    expect(out.error.code).toBe(1);
+    expect(out.error.message).toContain('path boom');
+    expect(out.error.details).toMatchObject({ command: 'unknown-cmd', backend: 'cjs' });
   });
 
   it('returns requires-command error for empty argv', async () => {
@@ -93,7 +119,45 @@ describe('runQueryDispatch', () => {
       resolveGsdToolsPath: () => '',
       dispatchNative: async () => ({ data: {} }),
     }, []);
-    expect(out.error?.code).toBe(10);
-    expect(out.error?.message).toContain('requires a command');
+    expect(out.ok).toBe(false);
+    if (out.ok) throw new Error('expected failure');
+    expect(out.error.code).toBe(10);
+    expect(out.error.kind).toBe('validation_error');
+    expect(out.error.message).toContain('requires a command');
+    expect(out.error.details).toEqual({ reason: 'missing_command' });
+  });
+
+  it('maps native timeout to native_timeout kind with details', async () => {
+    const registry = createRegistry();
+    const out = await runQueryDispatch({
+      registry,
+      projectDir: tmpDir,
+      cjsFallbackEnabled: true,
+      resolveGsdToolsPath: () => '',
+      dispatchNative: async () => { throw new Error('gsd-tools timed out after 30000ms: state load'); },
+    }, ['state', 'load']);
+
+    expect(out.ok).toBe(false);
+    if (out.ok) throw new Error('expected failure');
+    expect(out.error.kind).toBe('native_timeout');
+    expect(out.error.code).toBe(1);
+    expect(out.error.details).toMatchObject({ command: 'state.load', args: [], timeout_ms: 30000 });
+  });
+
+  it('maps native error to native_failure kind with details', async () => {
+    const registry = createRegistry();
+    const out = await runQueryDispatch({
+      registry,
+      projectDir: tmpDir,
+      cjsFallbackEnabled: true,
+      resolveGsdToolsPath: () => '',
+      dispatchNative: async () => { throw new Error('boom'); },
+    }, ['state', 'json']);
+
+    expect(out.ok).toBe(false);
+    if (out.ok) throw new Error('expected failure');
+    expect(out.error.kind).toBe('native_failure');
+    expect(out.error.code).toBe(1);
+    expect(out.error.details).toMatchObject({ command: 'state.json', args: [] });
   });
 });
