@@ -1,7 +1,7 @@
 import type { QueryResult } from './query/utils.js';
 import type { QueryRegistry } from './query/registry.js';
 import type { TransportMode } from './gsd-transport-policy.js';
-import { isTimeoutLikeError } from './query-failure-classification.js';
+import { toFailureSignal } from './query-failure-classification.js';
 
 export interface TransportRequest {
   legacyCommand: string;
@@ -49,7 +49,7 @@ export class GSDTransport {
         // Do not subprocess-fallback after a timed-out native dispatch:
         // the timeout does not cancel the native handler, so falling through
         // would run the same command twice (double-execution race).
-        if (isTimeoutLikeError(error)) throw error;
+        if (toFailureSignal(error).kind === 'timeout') throw error;
       }
     }
 
