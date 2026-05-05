@@ -462,6 +462,21 @@ objective: API routes
     assert.deepStrictEqual(output.incomplete, ['03-02'], 'incomplete list correct');
   });
 
+  test('phase-plan-index matches descriptive plan with prefix summary (#3101)', () => {
+    const phaseDir = path.join(tmpDir, '.planning', 'phases', '03-api');
+    fs.mkdirSync(phaseDir, { recursive: true });
+
+    fs.writeFileSync(path.join(phaseDir, '03-01-auth-hardening-PLAN.md'), `---\nwave: 1\n---\n## Task 1`);
+    fs.writeFileSync(path.join(phaseDir, '03-01-SUMMARY.md'), `# Summary`);
+
+    const result = runGsdTools('phase-plan-index 03', tmpDir);
+    assert.ok(result.success, `Command failed: ${result.error}`);
+
+    const output = JSON.parse(result.output);
+    assert.strictEqual(output.plans[0].has_summary, true, 'descriptive plan should match prefix summary');
+    assert.deepStrictEqual(output.incomplete, [], 'plan should not be marked incomplete');
+  });
+
   test('detects checkpoints (autonomous: false)', () => {
     const phaseDir = path.join(tmpDir, '.planning', 'phases', '03-api');
     fs.mkdirSync(phaseDir, { recursive: true });
