@@ -2,6 +2,7 @@ import type { QueryResult } from './query/utils.js';
 import type { QueryRegistry } from './query/registry.js';
 import type { TransportMode } from './gsd-transport-policy.js';
 import { toFailureSignal } from './query-failure-classification.js';
+import { GSDToolsError } from './gsd-tools-error.js';
 
 export interface TransportRequest {
   legacyCommand: string;
@@ -52,7 +53,16 @@ export class GSDTransport {
         onDecision?.({ dispatchMode: 'subprocess', reason: 'native_failure_fallback' });
       }
     } else {
-      onDecision?.({ dispatchMode: 'subprocess', reason: this.subprocessReason(request, policy) });
+      const reason = this.subprocessReason(request, policy);
+      onDecision?.({ dispatchMode: 'subprocess', reason });
+      if (!policy.allowFallbackToSubprocess) {
+        throw GSDToolsError.failure(
+          `Subprocess fallback disabled: command '${request.registryCommand}' cannot run without native dispatch`,
+          request.legacyCommand,
+          request.legacyArgs,
+          null,
+        );
+      }
     }
 
     return this.dispatchSubprocess(request);
