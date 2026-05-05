@@ -117,7 +117,11 @@ No agent spawn. STOP after printing.
 <mode_resume>
 **RESUME mode:**
 
-If $ARGUMENTS matches an existing thread name (file `.planning/threads/{ARGUMENTS}.md` exists):
+If $ARGUMENTS matches an existing thread name:
+
+**Sanitize first:** apply the same slug sanitization used by CLOSE and STATUS — strip any characters not matching `[a-z0-9-]`, reject slugs longer than 60 chars or containing `..` or `/`. If invalid, output "Invalid thread slug." and stop. Use the sanitized value as SLUG for all subsequent file path construction.
+
+Check `.planning/threads/{SLUG}.md` exists. If not, fall through to CREATE mode.
 
 Resume the thread — load its context into the current session. Read the file content and display it as plain text. Ask what the user wants to work on next.
 

@@ -30,11 +30,11 @@ const DRY_RUN      = process.argv.includes('--dry-run');
 const ROOT         = path.join(__dirname, '..');
 const COMMANDS_DIR = path.join(ROOT, 'commands', 'gsd');
 
-const AT_PATH_RE = /@(?:~|\$HOME)\/.+?get-shit-done\/[^\s`\)]+/g;
+const AT_PATH_PATTERN = /@(?:~|\$HOME)\/.+?get-shit-done\/[^\s`\)]+/;
+const mkAtRe = () => new RegExp(AT_PATH_PATTERN.source, 'g');
 
 function transformLine(line) {
-  if (!AT_PATH_RE.test(line)) return line;
-  AT_PATH_RE.lastIndex = 0;
+  if (!AT_PATH_PATTERN.test(line)) return line;
 
   const trimmed = line.trim();
 
@@ -76,8 +76,9 @@ function processFile(filePath) {
     if (/<(process|context)>/.test(t) && !t.includes('execution_context')) inProse = true;
     if (/<\/(process|context)>/.test(t) && !t.includes('execution_context')) inProse = false;
 
-    if (inProse && AT_PATH_RE.test(line)) {
-      AT_PATH_RE.lastIndex = 0;
+    if (inProse && AT_PATH_PATTERN.test(line)) {
+      const re = mkAtRe();
+      re.lastIndex = 0;
       out.push(transformLine(line));
     } else {
       out.push(line);

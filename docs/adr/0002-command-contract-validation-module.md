@@ -1,5 +1,8 @@
 # Command Contract Validation Module
 
+- **Status:** Accepted
+- **Date:** 2026-05-05
+
 We decided to centralize the `commands/gsd/*.md` file contract into a single validation seam enforced at two layers: a fast lint script (`scripts/lint-command-contract.cjs`) that runs as a pre-test CI step, and a behavioral regression test (`tests/command-contract.test.cjs`) that validates the full contract against the live filesystem.
 
 ## Decision

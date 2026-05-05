@@ -86,6 +86,10 @@ describe('extract-learnings workflow', () => {
     const content = fs.readFileSync(WORKFLOW_PATH, 'utf-8');
     assert.ok(content.includes('<step name='), 'Workflow must have named step tags');
     assert.ok(content.includes('</step>'), 'Workflow must close step tags');
+    assert.ok(
+      content.includes('<step name="extract-learnings">'),
+      'Workflow step must use hyphen convention: <step name="extract-learnings">',
+    );
   });
 
   test('workflow has success_criteria tag', () => {

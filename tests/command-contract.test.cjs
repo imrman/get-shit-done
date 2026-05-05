@@ -27,53 +27,11 @@ const ROOT         = path.join(__dirname, '..');
 const COMMANDS_DIR = path.join(ROOT, 'commands', 'gsd');
 const GSD_ROOT     = path.join(ROOT, 'get-shit-done');
 
-const CANONICAL_TOOLS = new Set([
-  'Read', 'Write', 'Edit', 'Bash', 'Glob', 'Grep',
-  'Task', 'Agent', 'Skill', 'SlashCommand',
-  'AskUserQuestion', 'WebFetch', 'WebSearch', 'TodoWrite',
-  'mcp__context7__resolve-library-id',
-  'mcp__context7__query-docs',
-  'mcp__context7__*',
-]);
-
-// ─── helpers ─────────────────────────────────────────────────────────────────
-
-function parseFrontmatter(content) {
-  const lines = content.split('\n');
-  if (lines[0].trim() !== '---') return {};
-  const end = lines.indexOf('---', 1);
-  if (end === -1) return {};
-  const fm = {};
-  let key = null;
-  for (const line of lines.slice(1, end)) {
-    const kv = line.match(/^([a-zA-Z0-9_-]+):\s*(.*)/);
-    if (kv) { key = kv[1]; fm[key] = kv[2].trim(); }
-    else if (key && line.match(/^\s+-\s+/)) {
-      const val = line.replace(/^\s+-\s+/, '').trim();
-      fm[key] = fm[key] ? fm[key] + '\n' + val : val;
-    }
-  }
-  return fm;
-}
-
-function executionContextRefs(content) {
-  const refs = [];
-  const re = /<execution_context(?:_extended)?>([\s\S]*?)<\/execution_context(?:_extended)?>/g;
-  let m;
-  while ((m = re.exec(content)) !== null) {
-    for (const rawLine of m[1].split('\n')) {
-      const line = rawLine.trim();
-      if (!line.startsWith('@')) continue;
-      const token = line.split(/\s+/)[0];
-      const trailingProse = line.length > token.length;
-      const normalized = token
-        .replace(/^@(?:~|\$HOME)\//, '')
-        .replace(/^(?:\.claude\/)?(?:get-shit-done\/)?/, '');
-      refs.push({ token, normalized, trailingProse });
-    }
-  }
-  return refs;
-}
+const {
+  CANONICAL_TOOLS,
+  parseFrontmatter,
+  executionContextRefs,
+} = require('../scripts/command-contract-helpers.cjs');
 
 const commandFiles = fs
   .readdirSync(COMMANDS_DIR)
@@ -128,27 +86,23 @@ describe('command contract: allowed-tools (ADR-0002)', () => {
 
 describe('command contract: execution_context @-refs resolve (ADR-0002)', () => {
   for (const { name, full } of commandFiles) {
-    const content = fs.readFileSync(full, 'utf-8');
-    const refs = executionContextRefs(content);
-    if (refs.length === 0) continue;
-    for (const { token, normalized } of refs) {
-      test(`${name}: @-ref "${normalized}" exists on disk`, () => {
+    test(`${name}: all execution_context @-refs exist on disk`, () => {
+      const refs = executionContextRefs(fs.readFileSync(full, 'utf-8'));
+      for (const { normalized } of refs) {
         assert.ok(
           fs.existsSync(path.join(GSD_ROOT, normalized)),
           `${name}: execution_context @-ref "${normalized}" does not exist — ` +
           'create the file or remove the reference',
         );
-      });
-    }
+      }
+    });
   }
 });
 
 describe('command contract: execution_context @-refs on own line (ADR-0002)', () => {
   for (const { name, full } of commandFiles) {
-    const content = fs.readFileSync(full, 'utf-8');
-    const refs = executionContextRefs(content);
-    if (refs.length === 0) continue;
     test(`${name}: no @-refs with trailing prose in execution_context`, () => {
+      const refs = executionContextRefs(fs.readFileSync(full, 'utf-8'));
       const bad = refs.filter(r => r.trailingProse);
       assert.equal(
         bad.length, 0,

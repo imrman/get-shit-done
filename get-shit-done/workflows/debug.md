@@ -64,6 +64,8 @@ STOP after displaying list. Do NOT proceed to further steps.
 
 When SUBCMD=status and SLUG is set:
 
+**Sanitize SLUG first:** strip whitespace, reject unless it matches `^[a-z0-9][a-z0-9-]*$`, enforce max 30 chars, reject any `..`, `/`, or `\`. If invalid, print "No debug session found with slug: {SLUG}" and stop.
+
 Check `.planning/debug/{SLUG}.md` exists. If not, check `.planning/debug/resolved/{SLUG}.md`. If neither, print "No debug session found with slug: {SLUG}" and stop.
 
 Parse and print full summary:
@@ -80,6 +82,8 @@ No agent spawn. Just information display. STOP after printing.
 ## 1c. CONTINUE subcommand
 
 When SUBCMD=continue and SLUG is set:
+
+**Sanitize SLUG first:** strip whitespace, reject unless it matches `^[a-z0-9][a-z0-9-]*$`, enforce max 30 chars, reject any `..`, `/`, or `\`. If invalid, print "No active debug session found with slug: {SLUG}. Check `/gsd-debug list` for active sessions." and stop.
 
 Check `.planning/debug/{SLUG}.md` exists. If not, print "No active debug session found with slug: {SLUG}. Check `/gsd-debug list` for active sessions." and stop.
 

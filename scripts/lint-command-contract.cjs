@@ -22,58 +22,11 @@ const ROOT          = path.join(__dirname, '..');
 const COMMANDS_DIR  = path.join(ROOT, 'commands', 'gsd');
 const GSD_ROOT      = path.join(ROOT, 'get-shit-done');
 
-// All tool names the Claude Code / GSD runtime recognises.
-// Wildcard entries (mcp__context7__*) match any mcp__context7__ prefixed name.
-const CANONICAL_TOOLS = new Set([
-  'Read', 'Write', 'Edit', 'Bash', 'Glob', 'Grep',
-  'Task', 'Agent', 'Skill', 'SlashCommand',
-  'AskUserQuestion', 'WebFetch', 'WebSearch', 'TodoWrite',
-  'mcp__context7__resolve-library-id',
-  'mcp__context7__query-docs',
-  'mcp__context7__*',
-]);
-
-// ─── parsers ─────────────────────────────────────────────────────────────────
-
-function parseFrontmatter(content) {
-  const lines = content.split('\n');
-  if (lines[0].trim() !== '---') return {};
-  const end = lines.indexOf('---', 1);
-  if (end === -1) return {};
-  const fm = {};
-  let key = null;
-  for (const line of lines.slice(1, end)) {
-    const kv = line.match(/^([a-zA-Z0-9_-]+):\s*(.*)/);
-    if (kv) { key = kv[1]; fm[key] = kv[2].trim(); }
-    else if (key && line.match(/^\s+-\s+/)) {
-      const val = line.replace(/^\s+-\s+/, '').trim();
-      fm[key] = fm[key] ? fm[key] + '\n' + val : val;
-    }
-  }
-  return fm;
-}
-
-function extractExecutionContextRefs(content) {
-  const results = [];
-  const blockRe = /<execution_context(?:_extended)?>([\s\S]*?)<\/execution_context(?:_extended)?>/g;
-  let m;
-  while ((m = blockRe.exec(content)) !== null) {
-    const block = m[1];
-    for (const rawLine of block.split('\n')) {
-      const line = rawLine.trim();
-      if (!line.startsWith('@')) continue;
-      // Capture the @-reference token (stops at first space)
-      const refToken = line.split(/\s+/)[0];
-      const hasTrailingProse = line.length > refToken.length;
-      // Normalise path: strip @~/.../get-shit-done/ or @$HOME/.../get-shit-done/ prefix
-      const normalized = refToken
-        .replace(/^@(?:~|\$HOME)\//, '')
-        .replace(/^(?:\.claude\/)?(?:get-shit-done\/)?/, '');
-      results.push({ ref: refToken, normalized, hasTrailingProse, rawLine });
-    }
-  }
-  return results;
-}
+const {
+  CANONICAL_TOOLS,
+  parseFrontmatter,
+  executionContextRefs: extractExecutionContextRefs,
+} = require('./command-contract-helpers.cjs');
 
 // ─── check one file ───────────────────────────────────────────────────────────
 
