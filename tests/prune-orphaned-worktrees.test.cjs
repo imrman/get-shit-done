@@ -21,6 +21,24 @@ function getPruneOrphanedWorktrees() {
 }
 
 // Create a minimal git repo with an initial commit on main.
+function canonicalPath(p) {
+  try {
+    return fs.realpathSync.native(path.resolve(p));
+  } catch {
+    return path.resolve(p);
+  }
+}
+
+function listedWorktreePaths(repoDir) {
+  const out = execSync('git worktree list --porcelain', { cwd: repoDir, encoding: 'utf8' });
+  return new Set(
+    out
+      .split('\n')
+      .filter((line) => line.startsWith('worktree '))
+      .map((line) => canonicalPath(line.slice('worktree '.length).trim()))
+  );
+}
+
 function createGitRepo(dir) {
   fs.mkdirSync(dir, { recursive: true });
   execSync('git init', { cwd: dir, stdio: 'pipe' });
@@ -79,10 +97,10 @@ describe('pruneOrphanedWorktrees', () => {
     );
 
     // Assert: git worktree list still shows it
-    const listOut = execSync('git worktree list', { cwd: repoDir, encoding: 'utf8' });
+    const listed = listedWorktreePaths(repoDir);
     assert.ok(
-      listOut.includes(worktreeDir),
-      'git worktree list should still reference merged worktree:\n' + listOut
+      listed.has(canonicalPath(worktreeDir)),
+      'git worktree list should still reference merged worktree'
     );
   });
 
