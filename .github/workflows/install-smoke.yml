@@ -90,6 +90,10 @@ jobs:
         if: steps.skip.outputs.skip != 'true'
         run: npm ci
 
+      - name: Build package assets
+        if: steps.skip.outputs.skip != 'true'
+        run: npm run build:hooks && npm run build:sdk
+
       - name: Pack root tarball
         if: steps.skip.outputs.skip != 'true'
         id: pack

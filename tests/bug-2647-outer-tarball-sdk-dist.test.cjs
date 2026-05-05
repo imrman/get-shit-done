@@ -33,6 +33,12 @@ const { execFileSync } = require('child_process');
 const REPO_ROOT = path.join(__dirname, '..');
 const PKG_PATH = path.join(REPO_ROOT, 'package.json');
 const SHIM_PATH = path.join(REPO_ROOT, 'bin', 'gsd-sdk.js');
+const INSTALL_SMOKE_WORKFLOW_PATH = path.join(
+  REPO_ROOT,
+  '.github',
+  'workflows',
+  'install-smoke.yml',
+);
 
 describe('bug #2647: outer tarball ships sdk/dist so gsd-sdk query works', () => {
   const pkg = JSON.parse(fs.readFileSync(PKG_PATH, 'utf-8'));
@@ -71,6 +77,41 @@ describe('bug #2647: outer tarball ships sdk/dist so gsd-sdk query works', () =>
     assert.ok(
       /build:sdk\b/.test(prepub),
       `scripts.prepublishOnly must invoke "build:sdk" so sdk/dist exists at pack time. Got: ${JSON.stringify(prepub)}`,
+    );
+  });
+
+  test('install-smoke builds publish assets before npm pack', () => {
+    const workflow = fs.readFileSync(INSTALL_SMOKE_WORKFLOW_PATH, 'utf-8');
+    const installDepsIndex = workflow.indexOf('name: Install root deps');
+    const buildHooksIndex = workflow.indexOf('npm run build:hooks');
+    const buildSdkIndex = workflow.indexOf('npm run build:sdk');
+    const packIndex = workflow.indexOf('name: Pack root tarball');
+
+    assert.notStrictEqual(
+      installDepsIndex,
+      -1,
+      'install-smoke.yml must install root deps before building package assets',
+    );
+    assert.notStrictEqual(
+      buildHooksIndex,
+      -1,
+      'install-smoke.yml must run build:hooks before npm pack',
+    );
+    assert.notStrictEqual(
+      buildSdkIndex,
+      -1,
+      'install-smoke.yml must run build:sdk before npm pack',
+    );
+    assert.notStrictEqual(
+      packIndex,
+      -1,
+      'install-smoke.yml must contain the root tarball pack step',
+    );
+    assert.ok(
+      installDepsIndex < buildHooksIndex &&
+        buildHooksIndex < buildSdkIndex &&
+        buildSdkIndex < packIndex,
+      'install-smoke.yml must align with publish order: npm ci, build:hooks, build:sdk, then npm pack',
     );
   });
 
