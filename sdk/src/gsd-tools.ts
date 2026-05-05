@@ -118,17 +118,22 @@ export class GSDTools {
     registryArgs: string[],
     mode: 'json' | 'raw',
   ): Promise<unknown> {
-    try {
-      return await this.nativeHotpathAdapter.dispatch(
+    return this.executeWithToolsError(legacyCommand, legacyArgs, () =>
+      this.nativeHotpathAdapter.dispatch(
         legacyCommand,
         legacyArgs,
         registryCommand,
         registryArgs,
         mode,
-      );
+      ));
+  }
+
+  private async executeWithToolsError<T>(command: string, args: string[], work: () => Promise<T>): Promise<T> {
+    try {
+      return await work();
     } catch (err) {
       if (err instanceof GSDToolsError) throw err;
-      throw this.toToolsError(legacyCommand, legacyArgs, err);
+      throw this.toToolsError(command, args, err);
     }
   }
 
@@ -139,12 +144,7 @@ export class GSDTools {
    * Handles the `@file:` prefix pattern for large results.
    */
   async exec(command: string, args: string[] = []): Promise<unknown> {
-    try {
-      return await this.commandExecutor.exec(command, args, 'json');
-    } catch (err) {
-      if (err instanceof GSDToolsError) throw err;
-      throw this.toToolsError(command, args, err);
-    }
+    return this.executeWithToolsError(command, args, () => this.commandExecutor.exec(command, args, 'json'));
   }
 
   // ─── Raw exec (no JSON parsing) ───────────────────────────────────────
@@ -154,12 +154,7 @@ export class GSDTools {
    * Use for commands like `config-set` that return plain text, not JSON.
    */
   async execRaw(command: string, args: string[] = []): Promise<string> {
-    try {
-      return await this.commandExecutor.exec(command, args, 'raw') as string;
-    } catch (err) {
-      if (err instanceof GSDToolsError) throw err;
-      throw this.toToolsError(command, args, err);
-    }
+    return this.executeWithToolsError(command, args, async () => this.commandExecutor.exec(command, args, 'raw') as string);
   }
 
 
