@@ -1252,6 +1252,28 @@ describe('phase insert command', () => {
     assert.ok(roadmap.includes('**Requirements**: TBD'), 'inserted phase entry should include Requirements TBD');
   });
 
+  test('reports actionable error for summary-only placeholder phase without detail section (#3098)', () => {
+    fs.writeFileSync(
+      path.join(tmpDir, '.planning', 'ROADMAP.md'),
+      `# Roadmap\n\n- [ ] **Phase 5: Placeholder**\n`
+    );
+
+    const result = runGsdTools('phase insert 5 Hotfix', tmpDir);
+    assert.ok(!result.success, 'should fail when phase is summary-only placeholder');
+    assert.ok(result.error.includes('missing a detail section'));
+  });
+
+  test('phase insert rejects unsupported --dry-run flag explicitly (#3098)', () => {
+    fs.writeFileSync(
+      path.join(tmpDir, '.planning', 'ROADMAP.md'),
+      `# Roadmap\n\n### Phase 1: Foundation\n**Goal:** Setup\n`
+    );
+
+    const result = runGsdTools('phase insert 1 Hotfix --dry-run', tmpDir);
+    assert.ok(!result.success, 'phase insert should reject unsupported --dry-run');
+    assert.ok(result.error.includes('does not support --dry-run'));
+  });
+
   test('handles #### heading depth from multi-milestone roadmaps', () => {
     fs.writeFileSync(
       path.join(tmpDir, '.planning', 'ROADMAP.md'),

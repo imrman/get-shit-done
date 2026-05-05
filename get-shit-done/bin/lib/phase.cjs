@@ -571,6 +571,10 @@ function cmdPhaseInsert(cwd, afterPhase, description, raw) {
     const afterPhaseEscaped = unpadded.replace(/\./g, '\\.');
     const targetPattern = new RegExp(`#{2,4}\\s*Phase\\s+0*${afterPhaseEscaped}:`, 'i');
     if (!targetPattern.test(content)) {
+      const checklistPattern = new RegExp(`-\\s*\\[[ x]\\]\\s*\\*\\*Phase\\s+0*${afterPhaseEscaped}:`, 'i');
+      if (checklistPattern.test(content)) {
+        error(`Phase ${afterPhase} exists in roadmap summary but is missing a detail section (### Phase ${afterPhase}: ...).`);
+      }
       error(`Phase ${afterPhase} not found in ROADMAP.md`);
     }
 
