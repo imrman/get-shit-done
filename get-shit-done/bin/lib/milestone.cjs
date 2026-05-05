@@ -107,7 +107,10 @@ function cmdMilestoneComplete(cwd, version, options, raw) {
   // Scope stats and accomplishments to only the phases belonging to the
   // current milestone's ROADMAP.  Uses the shared filter from core.cjs
   // (same logic used by cmdPhasesList and other callers).
-  const isDirInMilestone = getMilestonePhaseFilter(cwd);
+  const isDirInMilestone = getMilestonePhaseFilter(cwd, version);
+  if (isDirInMilestone.missingExplicitVersion) {
+    error(`no phases found for milestone ${version} in ROADMAP.md`);
+  }
 
   // Gather stats from phases (scoped to current milestone only)
   let phaseCount = 0;
