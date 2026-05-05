@@ -382,6 +382,21 @@ describe('security-scan.yml workflow', () => {
     assert.ok(content.includes('pull_request'), 'Must trigger on pull_request');
   });
 
+  test('workflow triggers on main push and manual dispatch', () => {
+    const content = fs.readFileSync(workflowPath, 'utf-8');
+    assert.ok(content.includes('push:'), 'Must trigger on push for post-sync main scans');
+    assert.ok(content.includes('workflow_dispatch'), 'Must support manual security scans');
+    assert.match(content, /push:[\s\S]*-\s+main/, 'Push trigger must include main');
+  });
+
+  test('workflow resolves a scan base for pull_request, push, and manual runs', () => {
+    const content = fs.readFileSync(workflowPath, 'utf-8');
+    assert.ok(content.includes('GSD_SCAN_BASE'), 'Must share resolved scan base with scan steps');
+    assert.ok(content.includes('EVENT_NAME'), 'Must branch on event type');
+    assert.ok(content.includes('BEFORE_SHA'), 'Must use push before SHA when available');
+    assert.ok(content.includes('HEAD^'), 'Must fallback for manual scans');
+  });
+
   test('workflow does not use direct github context in run commands', () => {
     const content = fs.readFileSync(workflowPath, 'utf-8');
     // Extract only run: blocks and check they don't contain ${{ }}

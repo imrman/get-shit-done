@@ -1,11 +1,17 @@
 name: Security Scan
 
 on:
+  push:
+    branches:
+      - main
+      - 'release/**'
+      - 'hotfix/**'
   pull_request:
     branches:
       - main
       - 'release/**'
       - 'hotfix/**'
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
@@ -22,35 +28,55 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Prompt injection scan
+      - name: Resolve scan base
         env:
-          BASE_REF: ${{ github.base_ref }}
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_REF: ${{ github.base_ref }}
+          BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            if [ -z "$PR_BASE_REF" ]; then
+              echo "Missing pull request base ref" >&2
+              exit 1
+            fi
+            SCAN_BASE="origin/$PR_BASE_REF"
+          elif [ -n "${BEFORE_SHA:-}" ] && ! printf '%s' "$BEFORE_SHA" | grep -Eq '^0{40}$'; then
+            SCAN_BASE="$BEFORE_SHA"
+          elif git rev-parse --verify HEAD^ >/dev/null 2>&1; then
+            SCAN_BASE="HEAD^"
+          else
+            SCAN_BASE="HEAD"
+          fi
+
+          if ! git rev-parse --verify "$SCAN_BASE^{commit}" >/dev/null 2>&1; then
+            echo "Unable to resolve scan base: $SCAN_BASE" >&2
+            exit 1
+          fi
+
+          printf 'GSD_SCAN_BASE=%s\n' "$SCAN_BASE" >> "$GITHUB_ENV"
+          echo "security-scan: using base $SCAN_BASE"
+
+      - name: Prompt injection scan
         run: |
           chmod +x scripts/prompt-injection-scan.sh
-          scripts/prompt-injection-scan.sh --diff "origin/$BASE_REF"
+          scripts/prompt-injection-scan.sh --diff "$GSD_SCAN_BASE"
 
       - name: Base64 obfuscation scan
-        env:
-          BASE_REF: ${{ github.base_ref }}
         run: |
           chmod +x scripts/base64-scan.sh
-          scripts/base64-scan.sh --diff "origin/$BASE_REF"
+          scripts/base64-scan.sh --diff "$GSD_SCAN_BASE"
 
       - name: Secret scan
-        env:
-          BASE_REF: ${{ github.base_ref }}
         run: |
           chmod +x scripts/secret-scan.sh
-          scripts/secret-scan.sh --diff "origin/$BASE_REF"
+          scripts/secret-scan.sh --diff "$GSD_SCAN_BASE"
 
       - name: Planning directory check
-        env:
-          BASE_REF: ${{ github.base_ref }}
         run: |
           # Ensure .planning/ runtime data is not committed in PRs
           # (The GSD repo itself has .planning/ in .gitignore, but PRs
           # from forks or misconfigured clones might include it)
-          PLANNING_FILES=$(git diff --name-only --diff-filter=ACMR "origin/$BASE_REF"...HEAD | grep '^\.planning/' || true)
+          PLANNING_FILES=$(git diff --name-only --diff-filter=ACMR "$GSD_SCAN_BASE"...HEAD | grep '^\.planning/' || true)
           if [ -n "$PLANNING_FILES" ]; then
             echo "FAIL: .planning/ runtime data must not be committed to PRs"
             echo "The following .planning/ files were found in this PR:"
