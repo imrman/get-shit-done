@@ -1,8 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
   errorMessage,
-  isTimeoutMessage,
-  parseTimeoutMs,
   timeoutMessage,
   toFailureSignal,
 } from './query-failure-classification.js';
@@ -11,10 +9,8 @@ import { GSDToolsError } from './gsd-tools-error.js';
 describe('query failure classification', () => {
   it('extracts timeout metadata from message', () => {
     const msg = timeoutMessage('state', ['load'], 30000);
-    expect(isTimeoutMessage(msg)).toBe(true);
-    expect(parseTimeoutMs(msg)).toBe(30000);
+    expect(toFailureSignal(new Error(msg))).toEqual({ kind: 'timeout', message: msg, timeoutMs: 30000 });
   });
-
   it('normalizes unknown error values', () => {
     expect(errorMessage('boom')).toBe('boom');
     expect(errorMessage(new Error('x'))).toBe('x');
