@@ -139,7 +139,7 @@ describe('#3164 — validate consistency: milestone-archive layout', () => {
 
     fs.writeFileSync(
       path.join(tmpDir, '.planning', 'STATE.md'),
-      'milestone: v1.7\n# Session State\n\nPhase: 65\n'
+      '# Session State\n\n**Milestone:** v1.7 Current Milestone\nPhase: 65\n'
     );
     fs.writeFileSync(
       path.join(tmpDir, '.planning', 'ROADMAP.md'),
@@ -238,6 +238,25 @@ describe('#3164 — find-phase: milestone-archive layout', () => {
       out.directory,
       '.planning/milestones/v1.2-phases/64-from-12',
       `Expected deterministic archive ordering (v1.2 before v1.10), got directory: ${out.directory}`
+    );
+  });
+
+  test('find-phase not-found payload includes searched_directories', () => {
+    setupMilestoneArchiveProject(tmpDir, {
+      milestone: 'v1.7',
+      phases: ['64-secondary-grader-fix'],
+      roadmapPhases: ['64'],
+    });
+
+    const result = runGsdTools('find-phase 999', tmpDir);
+    assert.ok(result.success, `find-phase should succeed with found:false payload: ${result.error}`);
+
+    const out = JSON.parse(result.output);
+    assert.strictEqual(out.found, false, `find-phase 999 should return found:false, got: ${JSON.stringify(out)}`);
+    assert.ok(Array.isArray(out.searched_directories), 'searched_directories should be an array on not-found payload');
+    assert.ok(
+      out.searched_directories.includes('.planning/milestones/v1.7-phases'),
+      `searched_directories should include active archive dir, got: ${JSON.stringify(out.searched_directories)}`
     );
   });
 });

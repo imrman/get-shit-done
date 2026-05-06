@@ -214,7 +214,7 @@ function cmdFindPhase(cwd, phase, raw) {
 
   const planBase = planningDir(cwd);
   const normalized = normalizePhaseName(phase);
-  const notFound = { found: false, directory: null, phase_number: null, phase_name: null, plans: [], summaries: [] };
+  const notFound = { found: false, directory: null, phase_number: null, phase_name: null, plans: [], summaries: [], searched_directories: [] };
 
   // Build candidate search dirs: flat layout first, then milestone-archive layout.
   const searchDirs = [];
@@ -229,6 +229,9 @@ function cmdFindPhase(cwd, phase, raw) {
       searchDirs.push(path.join(milestonesDir, e.name));
     }
   } catch { /* no milestones dir */ }
+
+  notFound.searched_directories = searchDirs.map((searchDir) =>
+    toPosixPath(path.join(path.relative(cwd, planBase), path.relative(planBase, searchDir))));
 
   for (const searchDir of searchDirs) {
     try {
