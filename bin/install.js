@@ -7399,10 +7399,6 @@ function install(isGlobal, runtime = 'claude') {
       const configDirReplacement = getConfigDirFromHome(runtime, isGlobal);
       for (const entry of hookEntries) {
         const srcFile = path.join(hooksSrc, entry);
-        if (fs.statSync(srcFile).isDirectory()) {
-          fs.cpSync(srcFile, path.join(hooksDest, entry), { recursive: true });
-          continue;
-        }
         if (fs.statSync(srcFile).isFile()) {
           const destFile = path.join(hooksDest, entry);
           // Template .js files to replace '.claude' with runtime-specific config dir
@@ -7437,6 +7433,10 @@ function install(isGlobal, runtime = 'claude') {
             }
           }
         }
+      }
+      const hookLibSrc = path.join(hooksSrc, 'lib');
+      if (fs.existsSync(hookLibSrc)) {
+        fs.cpSync(hookLibSrc, path.join(hooksDest, 'lib'), { recursive: true });
       }
       if (verifyInstalled(hooksDest, 'hooks')) {
         console.log(`  ${green}✓${reset} Installed hooks (bundled)`);
@@ -7563,10 +7563,6 @@ function install(isGlobal, runtime = 'claude') {
       const configDirReplacement = getConfigDirFromHome(runtime, isGlobal);
       for (const entry of fs.readdirSync(codexHooksSrc)) {
         const srcFile = path.join(codexHooksSrc, entry);
-        if (fs.statSync(srcFile).isDirectory()) {
-          fs.cpSync(srcFile, path.join(codexHooksDest, entry), { recursive: true });
-          continue;
-        }
         if (!fs.statSync(srcFile).isFile()) continue;
         const destFile = path.join(codexHooksDest, entry);
         if (entry.endsWith('.js')) {
@@ -7587,6 +7583,10 @@ function install(isGlobal, runtime = 'claude') {
             fs.copyFileSync(srcFile, destFile);
           }
         }
+      }
+      const codexHookLibSrc = path.join(codexHooksSrc, 'lib');
+      if (fs.existsSync(codexHookLibSrc)) {
+        fs.cpSync(codexHookLibSrc, path.join(codexHooksDest, 'lib'), { recursive: true });
       }
       console.log(`  ${green}✓${reset} Installed hooks`);
     }
