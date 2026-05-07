@@ -68,6 +68,7 @@ PATTERNS=(
 ALLOWLIST=(
   'scripts/prompt-injection-scan.sh'
   'scripts/base64-scan.sh'
+  'scripts/base64-scan.cjs'
   'scripts/secret-scan.sh'
   'tests/security-scan.test.cjs'
   'tests/security.test.cjs'
