@@ -30,7 +30,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 
-const { buildHookCommand } = require('../bin/install.js');
+const { buildHookCommand, resolveNodeRunner } = require('../bin/install.js');
 
 const INSTALL_SRC = path.join(__dirname, '..', 'bin', 'install.js');
 
@@ -192,7 +192,7 @@ describe('hook command shell escaping', () => {
 
     assert.strictEqual(
       command,
-      "node '/tmp/evil $(touch /tmp/pwn) `uname` it'\"'\"'s here/hooks/gsd-check-update.js'"
+      `${resolveNodeRunner()} '/tmp/evil $(touch /tmp/pwn) \`uname\` it'\"'\"'s here/hooks/gsd-check-update.js'`
     );
     assert.ok(!command.includes('"$(touch /tmp/pwn)"'), 'must not leave command substitution inside double quotes');
     assert.ok(!command.includes('"`uname`"'), 'must not leave backticks inside double quotes');
@@ -207,9 +207,9 @@ describe('hook command shell escaping', () => {
 
     assert.strictEqual(
       command,
-      `node "$HOME"'/.codex-$(touch /tmp/pwn)-\`uname\`/hooks/gsd-check-update.js'`
+      `${resolveNodeRunner()} "$HOME"'/.codex-$(touch /tmp/pwn)-\`uname\`/hooks/gsd-check-update.js'`
     );
-    assert.ok(command.startsWith('node "$HOME"'), 'portable hook command must still expand $HOME');
+    assert.ok(command.startsWith(`${resolveNodeRunner()} "$HOME"`), 'portable hook command must still expand $HOME');
     assert.ok(!command.includes('"$HOME/.codex-$(touch /tmp/pwn)-`uname`/hooks/gsd-check-update.js"'),
       'portable hook command must not wrap the substituted path in double quotes');
   });

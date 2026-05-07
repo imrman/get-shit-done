@@ -244,15 +244,15 @@ For each CONTEXT.md read: extract `<decisions>` (locked preferences), `<specific
 
 **Spike/sketch findings:** Check for project-local skills:
 ```bash
-SPIKE_FINDINGS=$(ls ./.claude/skills/spike-findings-*/SKILL.md 2>/dev/null | head -1)
-SKETCH_FINDINGS=$(ls ./.claude/skills/sketch-findings-*/SKILL.md 2>/dev/null | head -1)
+SPIKE_FINDINGS=$(ls ./.claude/skills/spike-findings-*/SKILL.md 2>/dev/null | head -1 || true)
+SKETCH_FINDINGS=$(ls ./.claude/skills/sketch-findings-*/SKILL.md 2>/dev/null | head -1 || true)
 RAW_SPIKES=$(ls .planning/spikes/MANIFEST.md 2>/dev/null)
 RAW_SKETCHES=$(ls .planning/sketches/MANIFEST.md 2>/dev/null)
 ```
 
 If findings skills exist, read SKILL.md and reference files; extract validated patterns, landmines, constraints, design decisions. Add them to `<prior_decisions>`.
 
-If raw spikes/sketches exist but no findings skill, note: `⚠ Unpackaged spikes/sketches detected — run /gsd-spike-wrap-up or /gsd-sketch-wrap-up to make findings available.`
+If raw spikes/sketches exist but no findings skill, note: `⚠ Unpackaged spikes/sketches detected — run /gsd-spike --wrap-up or /gsd-sketch --wrap-up to make findings available.`
 
 Build internal `<prior_decisions>` with sections for Project-Level (from PROJECT.md / REQUIREMENTS.md), From Prior Phases (per-phase decisions), and From Spike/Sketch Findings (validated patterns, landmines, design decisions).
 

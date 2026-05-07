@@ -23,9 +23,10 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { GSDError, ErrorClassification } from '../errors.js';
 import { VALID_PROFILES, getAgentToModelMapForProfile } from './config-query.js';
-import { VALID_CONFIG_KEYS, DYNAMIC_KEY_PATTERNS } from './config-schema.js';
+import { VALID_CONFIG_KEYS, RUNTIME_STATE_KEYS, DYNAMIC_KEY_PATTERNS } from './config-schema.js';
 import { planningPaths } from './helpers.js';
 import { acquireStateLock, releaseStateLock } from './state-mutation.js';
+import { maskIfSecret } from './secrets.js';
 import type { QueryHandler } from './utils.js';
 
 /**
@@ -85,6 +86,7 @@ const CONFIG_KEY_SUGGESTIONS: Record<string, string> = {
  */
 export function isValidConfigKey(keyPath: string): { valid: boolean; suggestion?: string } {
   if (VALID_CONFIG_KEYS.has(keyPath)) return { valid: true };
+  if (RUNTIME_STATE_KEYS.has(keyPath)) return { valid: true };
 
   // Dynamic patterns — all sourced from shared config-schema (#2653).
   // Covers agent_skills.*, review.models.*, features.*,
@@ -233,14 +235,17 @@ export const configSet: QueryHandler = async (args, projectDir, workstream) => {
     await releaseStateLock(lockPath);
   }
 
-  // Match CJS JSON: `JSON.stringify` omits keys whose value is `undefined`
+  // Mask plaintext for keys in SECRET_CONFIG_KEYS to match CJS behavior at
+  // config.cjs:362-370 — without this, `gsd-sdk query config-set brave_search XXX`
+  // would echo the plaintext credential into machine-readable output. (#2997)
+  // The on-disk value is intentionally NOT masked — only the response.
   const data: Record<string, unknown> = {
     updated: true,
     key: keyPath,
-    value: parsedValue,
+    value: maskIfSecret(keyPath, parsedValue),
   };
   if (previousValue !== undefined) {
-    data.previousValue = previousValue;
+    data.previousValue = maskIfSecret(keyPath, previousValue);
   }
   return { data };
 };

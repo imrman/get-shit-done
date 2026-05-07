@@ -6,7 +6,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { execSync, execFileSync, spawnSync } = require('child_process');
-const { MODEL_PROFILES } = require('./model-profiles.cjs');
+const { MODEL_PROFILES, AGENT_TO_PHASE_TYPE, VALID_PHASE_TYPES, AGENT_DEFAULT_TIERS, VALID_AGENT_TIERS, nextTier } = require('./model-profiles.cjs');
 // Compatibility shim: new imports should use planning-workspace.cjs directly.
 const {
   planningDir,
@@ -201,8 +201,68 @@ function output(result, raw, rawValue) {
   fs.writeSync(1, data);
 }
 
-function error(message) {
-  fs.writeSync(2, 'Error: ' + message + '\n');
+/**
+ * Frozen enum of typed reason codes used by error() for structured errors.
+ * Each subcommand contributes its own codes; the enum exists so tests can
+ * assert against typed values instead of grepping stderr (#2974).
+ *
+ * Adding a new code:
+ *   - Pick a snake_case lowercase value (the JSON wire form)
+ *   - Group by subsystem prefix (CONFIG_*, SDK_*, etc)
+ *   - Pass it to error(msg, ERROR_REASON.NEW_CODE) at the call site
+ */
+const ERROR_REASON = Object.freeze({
+  // config-get / config-set
+  CONFIG_KEY_NOT_FOUND: 'config_key_not_found',
+  CONFIG_NO_FILE: 'config_no_file',
+  CONFIG_PARSE_FAILED: 'config_parse_failed',
+  CONFIG_INVALID_KEY: 'config_invalid_key',
+  // SDK / gsd-tools dispatch
+  SDK_FAIL_FAST: 'sdk_fail_fast',
+  SDK_UNKNOWN_COMMAND: 'sdk_unknown_command',
+  SDK_MISSING_ARG: 'sdk_missing_arg',
+  // workflow / phase
+  PHASE_NOT_FOUND: 'phase_not_found',
+  SUMMARY_NO_PLANNING: 'summary_no_planning',
+  // graphify
+  GRAPHIFY_NO_GRAPH: 'graphify_no_graph',
+  GRAPHIFY_INVALID_QUERY: 'graphify_invalid_query',
+  // hooks
+  HOOKS_OPT_OUT: 'hooks_opt_out',
+  // security-scan
+  SECURITY_SCAN_FAILED: 'security_scan_failed',
+  // generic
+  USAGE: 'usage',
+  UNKNOWN: 'unknown',
+});
+
+/**
+ * Process-level flag: when true, error() emits structured JSON to stderr
+ * instead of plain "Error: <message>" text. Set by gsd-tools.cjs when the
+ * CLI is invoked with `--json-errors`. Tests opt in to typed-IR error
+ * assertions by passing that flag and parsing the JSON.
+ *
+ * Default off so existing callers and human operators keep their plain-text
+ * diagnostics. The structured form is opt-in for tooling and tests (#2974).
+ */
+let _jsonErrorMode = false;
+function setJsonErrorMode(v) { _jsonErrorMode = !!v; }
+function getJsonErrorMode() { return _jsonErrorMode; }
+
+/**
+ * Emit an error and exit. When the second argument is provided it must be
+ * a value from ERROR_REASON; tests can assert on `result.reason`. When the
+ * process is in JSON-error mode, stderr receives `{ ok: false, reason,
+ * message }` so callers can parse it; otherwise stderr keeps the plain
+ * text form for human operators.
+ */
+function error(message, reason = ERROR_REASON.UNKNOWN) {
+  if (_jsonErrorMode) {
+    const payload = JSON.stringify({ ok: false, reason, message }) + '\n';
+    fs.writeSync(2, payload);
+  } else {
+    fs.writeSync(2, 'Error: ' + message + '\n');
+  }
   process.exit(1);
 }
 
@@ -440,6 +500,17 @@ function loadConfig(cwd) {
       project_code: get('project_code') ?? defaults.project_code,
       subagent_timeout: get('subagent_timeout', { section: 'workflow', field: 'subagent_timeout' }) ?? defaults.subagent_timeout,
       model_overrides: parsed.model_overrides || null,
+      // #3023 — per-phase-type model map. Six named slots
+      // (planning/discuss/research/execution/verification/completion).
+      // Resolves between per-agent override and profile-derived tier in
+      // resolveModelInternal. Defaults to null so configs without it
+      // behave exactly as today.
+      models: parsed.models || null,
+      // #3024 — dynamic routing block. When `enabled: true`, the
+      // resolveModelForTier() resolver picks tier_models[default_tier]
+      // for the agent and escalates one tier per attempt up to
+      // max_escalations. Disabled by default for backward compat.
+      dynamic_routing: parsed.dynamic_routing || null,
       // #2517 — runtime-aware profiles. `runtime` defaults to null (back-compat).
       // When null, resolveModelInternal preserves today's Claude-native behavior.
       // NOTE: `runtime` and `model_profile_overrides` are intentionally read
@@ -500,6 +571,8 @@ function loadConfig(cwd) {
         context_window: globalDefaults.context_window ?? defaults.context_window,
         subagent_timeout: globalDefaults.subagent_timeout ?? defaults.subagent_timeout,
         model_overrides: globalDefaults.model_overrides || null,
+        models: globalDefaults.models || null,
+        dynamic_routing: globalDefaults.dynamic_routing || null,
         agent_skills: globalDefaults.agent_skills || {},
         response_language: globalDefaults.response_language || null,
       };
@@ -719,19 +792,13 @@ function parseWorktreePorcelain(porcelain) {
 }
 
 /**
- * Remove linked git worktrees whose branch has already been merged into the
- * current HEAD of the main worktree.  Also runs `git worktree prune` to clear
- * any stale references left by manually-deleted worktree directories.
+ * Clear stale worktree metadata references via `git worktree prune`.
  *
- * Safe guards:
- *  - Never removes the main worktree (first entry in --porcelain output).
- *  - Never removes the worktree at process.cwd().
- *  - Never removes a worktree whose branch has unmerged commits.
- *  - Skips detached-HEAD worktrees (no branch name).
+ * Destructive linked-worktree removal is disabled by default for safety.
  *
  * @param {string} repoRoot - absolute path to the main (or any) worktree of
  *   the repository; used as `cwd` for git commands.
- * @returns {string[]} list of worktree paths that were removed
+ * @returns {string[]} list of worktree paths that were removed (always empty)
  */
 function pruneOrphanedWorktrees(repoRoot) {
   const pruned = [];
@@ -748,37 +815,14 @@ function pruneOrphanedWorktrees(repoRoot) {
       return pruned;
     }
 
-    // 2. First entry is the main worktree — never touch it
-    const mainWorktreePath = worktrees[0].path;
-
-    // 3. Check each non-main worktree
-    for (let i = 1; i < worktrees.length; i++) {
-      const { path: wtPath, branch } = worktrees[i];
-
-      // Never remove the worktree for the current process directory
-      if (wtPath === cwd || cwd.startsWith(wtPath + path.sep)) continue;
-
-      // Check if the branch is fully merged into HEAD (main)
-      // git merge-base --is-ancestor <branch> HEAD exits 0 when merged
-      const ancestorCheck = execGit(repoRoot, [
-        'merge-base', '--is-ancestor', branch, 'HEAD',
-      ]);
-
-      if (ancestorCheck.exitCode !== 0) {
-        // Not yet merged — leave it alone
-        continue;
-      }
-
-      // Remove the worktree and delete the branch
-      const removeResult = execGit(repoRoot, ['worktree', 'remove', '--force', wtPath]);
-      if (removeResult.exitCode === 0) {
-        execGit(repoRoot, ['branch', '-D', branch]);
-        pruned.push(wtPath);
-      }
-    }
+    // Destructive removal of linked worktrees is intentionally disabled.
+    // Keep metadata cleanup only (git worktree prune), which clears stale refs
+    // for manually-deleted directories without removing active sibling worktrees.
+    void cwd;
+    void worktrees;
   } catch { /* never crash the caller */ }
 
-  // 4. Always run prune to clear stale references (e.g. manually-deleted dirs)
+  // Always run prune to clear stale references (e.g. manually-deleted dirs)
   execGit(repoRoot, ['worktree', 'prune']);
 
   return pruned;
@@ -877,6 +921,17 @@ function phaseTokenMatches(dirName, normalized) {
   return false;
 }
 
+function extractCanonicalPlanId(filename) {
+  const base = filename.replace(/-PLAN\.md$/i, '').replace(/-SUMMARY\.md$/i, '').replace(/\.md$/i, '');
+  const parts = base.split('-').filter(Boolean);
+  const tokenRe = /^\d+[A-Z]?(?:\.\d+)*$/i;
+  const phaseIdx = parts.findIndex(p => tokenRe.test(p));
+  if (phaseIdx >= 0 && phaseIdx + 1 < parts.length && tokenRe.test(parts[phaseIdx + 1])) {
+    return `${parts[phaseIdx]}-${parts[phaseIdx + 1]}`;
+  }
+  return base;
+}
+
 function searchPhaseInDir(baseDir, relBase, normalized) {
   try {
     const dirs = readSubdirectories(baseDir, true);
@@ -897,11 +952,16 @@ function searchPhaseInDir(baseDir, relBase, normalized) {
     const summaries = unsortedSummaries.sort();
 
     const completedPlanIds = new Set(
-      summaries.map(s => s.replace('-SUMMARY.md', '').replace('SUMMARY.md', ''))
+      summaries.flatMap(s => {
+        const exact = s.replace('-SUMMARY.md', '').replace('SUMMARY.md', '');
+        const canonical = extractCanonicalPlanId(s);
+        return canonical === exact ? [exact] : [exact, canonical];
+      })
     );
     const incompletePlans = plans.filter(p => {
       const planId = p.replace('-PLAN.md', '').replace('PLAN.md', '');
-      return !completedPlanIds.has(planId);
+      const canonical = extractCanonicalPlanId(p);
+      return !completedPlanIds.has(planId) && !completedPlanIds.has(canonical);
     });
 
     return {
@@ -1458,10 +1518,37 @@ function resolveModelInternal(cwd, agentType) {
     return override;
   }
 
-  // 2. Compute the tier (opus/sonnet/haiku) for this agent under the active profile.
+  // 2. Compute the tier (opus/sonnet/haiku/inherit) for this agent.
+  //
+  // #3023: phase-type slot can override the profile-derived tier.
+  // Precedence: per-agent override (above) > phase-type slot > profile.
+  // Phase-type values are tier aliases (opus/sonnet/haiku/inherit) — same
+  // shape as model_profile output — so the runtime-resolution chain
+  // (step 3), resolve_model_ids handling (step 4), and profile lookup
+  // (step 5) all stay correct without further branching.
   const profile = String(config.model_profile || 'balanced').toLowerCase();
   const agentModels = MODEL_PROFILES[agentType];
-  const tier = agentModels ? (agentModels[profile] || agentModels['balanced']) : null;
+  const phaseType = AGENT_TO_PHASE_TYPE[agentType];
+  const phaseTypeTier = (phaseType && config.models && typeof config.models === 'object')
+    ? config.models[phaseType]
+    : undefined;
+  // Only honor phase-type tier if it's one of the recognized aliases.
+  // Anything else falls through to profile lookup so a typo doesn't
+  // silently break tier resolution.
+  const VALID_TIERS = new Set(['opus', 'sonnet', 'haiku', 'inherit']);
+  // Resolve tier: phase-type wins when valid; else profile-derived; else
+  // (when profile === 'inherit') propagate inherit so the later short-
+  // circuit fires. CR Major (#3030): a config like
+  //   { model_profile: 'inherit', models: { execution: 'opus' } }
+  // must honor the phase-type opus, not return 'inherit'. Synthesizing
+  // tier='inherit' only when there's no phase-type override keeps the
+  // original inherit semantics intact while letting a valid phase-type
+  // tier win.
+  const tier = (phaseTypeTier && VALID_TIERS.has(phaseTypeTier))
+    ? phaseTypeTier
+    : (profile === 'inherit'
+      ? 'inherit'
+      : (agentModels ? (agentModels[profile] || agentModels['balanced']) : null));
 
   // 3. Runtime-aware resolution (#2517) — only when `runtime` is explicitly set
   // to a non-Claude runtime. `runtime: "claude"` is the implicit default and is
@@ -1469,8 +1556,10 @@ function resolveModelInternal(cwd, agentType) {
   // "omit"` (review finding #4). Deliberate ordering for non-Claude runtimes:
   // explicit opt-in beats `resolve_model_ids: "omit"` so users on Codex installs
   // that auto-set "omit" can still flip on tiered behavior by setting runtime
-  // alone. inherit profile is preserved verbatim.
-  if (config.runtime && config.runtime !== 'claude' && profile !== 'inherit' && tier) {
+  // alone. Gate on tier !== 'inherit' (not profile !== 'inherit') so a
+  // valid phase-type tier flips runtime resolution on even when the
+  // profile is inherit.
+  if (config.runtime && config.runtime !== 'claude' && tier && tier !== 'inherit') {
     const entry = _resolveRuntimeTier(config, tier);
     if (entry?.model) return entry.model;
     // Unknown runtime with no user-supplied overrides — fall through to Claude-safe
@@ -1486,7 +1575,9 @@ function resolveModelInternal(cwd, agentType) {
 
   // 5. Profile lookup (Claude-native default).
   if (!agentModels) return 'sonnet';
-  if (profile === 'inherit') return 'inherit';
+  // Gate on tier (not profile) so a valid phase-type override beats
+  // profile=inherit (#3030 CR Major).
+  if (tier === 'inherit') return 'inherit';
   // `tier` is guaranteed truthy here: agentModels exists, and MODEL_PROFILES
   // entries always define `balanced`, so `agentModels[profile] || agentModels.balanced`
   // resolves to a string. Keep the local for readability — no defensive fallback.
@@ -1498,6 +1589,94 @@ function resolveModelInternal(cwd, agentType) {
     return MODEL_ALIAS_MAP[alias] || alias;
   }
 
+  return alias;
+}
+
+/**
+ * #3024 — Resolve a model for a specific dynamic-routing attempt.
+ *
+ * The orchestrator (workflow agent) tracks the attempt counter. On
+ * the first spawn, it calls with attempt=0. If the orchestrator detects
+ * a soft failure (verification inconclusive, plan-check FLAG, etc.),
+ * it re-spawns with attempt=1, which escalates the agent's tier one
+ * step up. `max_escalations` caps how many escalations are allowed.
+ *
+ * Resolution precedence (highest → lowest):
+ *   1. config.model_overrides[agent]              (full IDs accepted)
+ *   2. dynamic_routing.tier_models[escalated_tier] (when enabled)
+ *   3. models[phase_type] / model_profile          (existing chain via
+ *                                                    resolveModelInternal)
+ *
+ * When dynamic_routing is null/disabled, this function is identical
+ * to resolveModelInternal — orchestrators can call it unconditionally
+ * without breaking back-compat.
+ *
+ * @param {string} cwd - Project directory.
+ * @param {string} agentType - Agent name (e.g. 'gsd-verifier').
+ * @param {number} [attempt=0] - 0 for first spawn; 1+ for escalation.
+ *                               Capped internally at max_escalations.
+ * @returns {string} Model alias (opus/sonnet/haiku) or full ID.
+ */
+function resolveModelForTier(cwd, agentType, attempt) {
+  const config = loadConfig(cwd);
+  const attemptN = Number.isInteger(attempt) && attempt > 0 ? attempt : 0;
+
+  // Per-agent override always wins — same as resolveModelInternal step 1.
+  // User-supplied full IDs bypass the entire tier mechanism.
+  const override = config.model_overrides?.[agentType];
+  if (override) return override;
+
+  const dr = config.dynamic_routing;
+  // Disabled / missing / non-object → fall back to the existing resolver.
+  if (!dr || typeof dr !== 'object' || dr.enabled !== true) {
+    return resolveModelInternal(cwd, agentType);
+  }
+
+  const tierModels = dr.tier_models;
+  if (!tierModels || typeof tierModels !== 'object') {
+    // tier_models missing — can't dynamic-route; fall back.
+    return resolveModelInternal(cwd, agentType);
+  }
+
+  const defaultTier = AGENT_DEFAULT_TIERS[agentType];
+  if (!defaultTier || !VALID_AGENT_TIERS.has(defaultTier)) {
+    // Unmapped agent — no default tier; fall back so we don't silently
+    // pick the wrong model.
+    return resolveModelInternal(cwd, agentType);
+  }
+
+  // Cap effective escalation at max_escalations (default 1). Beyond
+  // the cap, the resolver returns the model for the cap level so the
+  // orchestrator can log "max escalations reached" without burning
+  // further budget.
+  //
+  // CR Major (#3031): `escalate_on_failure: false` is the kill-switch
+  // for escalation — when false, every attempt resolves to the default
+  // tier regardless of the attempt counter. Without this guard, an
+  // orchestrator that blindly bumps the counter on retry would silently
+  // escalate even though the user opted out.
+  const maxEscalations = Number.isInteger(dr.max_escalations) && dr.max_escalations >= 0
+    ? dr.max_escalations
+    : 1;
+  const escalationEnabled = dr.escalate_on_failure !== false;
+  const effectiveAttempt = escalationEnabled
+    ? Math.min(attemptN, maxEscalations)
+    : 0;
+
+  // Walk the escalation chain N times from the default tier.
+  let tier = defaultTier;
+  for (let i = 0; i < effectiveAttempt; i += 1) {
+    const next = nextTier(tier);
+    if (!next || next === tier) break; // already at top
+    tier = next;
+  }
+
+  const alias = tierModels[tier];
+  if (typeof alias !== 'string' || alias.length === 0) {
+    // Misconfigured tier_models — missing slot. Fall back rather
+    // than emit an empty model id.
+    return resolveModelInternal(cwd, agentType);
+  }
   return alias;
 }
 
@@ -1526,11 +1705,38 @@ function resolveReasoningEffortInternal(cwd, agentType) {
   if (config.model_overrides?.[agentType]) return null;
 
   const profile = String(config.model_profile || 'balanced').toLowerCase();
-  if (profile === 'inherit') return null;
   const agentModels = MODEL_PROFILES[agentType];
   if (!agentModels) return null;
-  const tier = agentModels[profile] || agentModels['balanced'];
-  if (!tier) return null;
+
+  // #3023 (CR Major): mirror the phase-type tier lookup from
+  // resolveModelInternal. Without this, `model` and `reasoning_effort`
+  // derive from different tier sources on Codex when models.<phase_type>
+  // overrides the profile.
+  //
+  // #3030 CR follow-up: do NOT short-circuit on profile === 'inherit'
+  // before reading the phase-type tier. A config like
+  //   { model_profile: 'inherit', models: { execution: 'opus' } }
+  // must produce the opus runtime effort, not null. Compute tier from
+  // phase-type first; only fall back to profile when there's no valid
+  // phase-type override; only return null when the resolved tier is
+  // 'inherit' or unknown.
+  const phaseType = AGENT_TO_PHASE_TYPE[agentType];
+  const phaseTypeTier = (phaseType && config.models && typeof config.models === 'object')
+    ? config.models[phaseType]
+    : undefined;
+  // Explicit phase-type 'inherit' is the user opting out of tier-based
+  // effort for this phase — return null instead of falling through to
+  // profile (which would silently emit the profile's effort and
+  // contradict the user's choice).
+  if (phaseTypeTier === 'inherit') return null;
+  const VALID_TIERS = new Set(['opus', 'sonnet', 'haiku']);
+  const tier = (phaseTypeTier && VALID_TIERS.has(phaseTypeTier))
+    ? phaseTypeTier
+    : (profile === 'inherit'
+      ? 'inherit'
+      : (agentModels[profile] || agentModels['balanced']));
+  // 'inherit' (from profile fallback) yields no runtime effort.
+  if (!tier || tier === 'inherit') return null;
 
   const entry = _resolveRuntimeTier(config, tier);
   return entry?.reasoning_effort || null;
@@ -1676,10 +1882,62 @@ function getMilestoneInfo(cwd) {
  * to the current milestone based on ROADMAP.md phase headings.
  * If no ROADMAP exists or no phases are listed, returns a pass-all filter.
  */
-function getMilestonePhaseFilter(cwd) {
+function getMilestonePhaseFilter(cwd, versionOverride) {
   const milestonePhaseNums = new Set();
+  let missingExplicitVersion = false;
   try {
-    const roadmap = extractCurrentMilestone(fs.readFileSync(path.join(planningDir(cwd), 'ROADMAP.md'), 'utf-8'), cwd);
+    const roadmapPath = path.join(planningDir(cwd), 'ROADMAP.md');
+    const roadmapContent = fs.readFileSync(roadmapPath, 'utf-8');
+    let roadmap = extractCurrentMilestone(roadmapContent, cwd);
+
+    if (versionOverride) {
+      const escapedVersion = escapeRegex(versionOverride);
+      const sectionPattern = new RegExp(`(^#{1,3}\\s+.*${escapedVersion}[^\\n]*)`, 'mi');
+      const sectionMatch = roadmapContent.match(sectionPattern);
+      if (!sectionMatch) {
+        // Only treat this as an error case when the roadmap is milestone-versioned.
+        // Older/flat roadmap formats without vX.Y milestone headings should keep
+        // legacy pass-through behavior for milestone.complete.
+        const hasVersionedMilestones = /^#{1,3}\s+.*v\d+\.\d+/mi.test(roadmapContent);
+        if (hasVersionedMilestones) {
+          roadmap = '';
+          missingExplicitVersion = true;
+        }
+      } else {
+        const sectionStart = sectionMatch.index;
+        const headingLevel = sectionMatch[1].match(/^(#{1,3})\s/)[1].length;
+        const restContent = roadmapContent.slice(sectionStart + sectionMatch[0].length);
+        const nextMilestonePattern = new RegExp(`^#{1,${headingLevel}}\\s+(?!Phase\\s+\\S)(?:.*v\\d+\\.\\d+|✅|📋|🚧)`, 'i');
+
+        let sectionEnd = roadmapContent.length;
+        let fenceChar = null;
+        let fenceLen = 0;
+        let charOffset = 0;
+        for (const line of restContent.split('\n')) {
+          const fenceMatch = line.match(/^\s{0,3}((?:`{3,}|~{3,}))(.*)/);
+          if (fenceMatch) {
+            const char = fenceMatch[1][0];
+            const len = fenceMatch[1].length;
+            const trailing = fenceMatch[2] || '';
+            if (!fenceChar) {
+              fenceChar = char;
+              fenceLen = len;
+            } else if (char === fenceChar && len >= fenceLen && /^\s*$/.test(trailing)) {
+              fenceChar = null;
+              fenceLen = 0;
+            }
+          } else if (!fenceChar && nextMilestonePattern.test(line)) {
+            sectionEnd = sectionStart + sectionMatch[0].length + charOffset;
+            break;
+          }
+          charOffset += line.length + 1;
+        }
+
+        const currentSection = roadmapContent.slice(sectionStart, sectionEnd);
+        roadmap = currentSection;
+      }
+    }
+
     // Match both numeric phases (Phase 1:) and custom IDs (Phase PROJ-42:)
     const phasePattern = /#{2,4}\s*Phase\s+([\w][\w.-]*)\s*:/gi;
     let m;
@@ -1691,6 +1949,7 @@ function getMilestonePhaseFilter(cwd) {
   if (milestonePhaseNums.size === 0) {
     const passAll = () => true;
     passAll.phaseCount = 0;
+    passAll.missingExplicitVersion = missingExplicitVersion;
     return passAll;
   }
 
@@ -1708,6 +1967,7 @@ function getMilestonePhaseFilter(cwd) {
     return false;
   }
   isDirInMilestone.phaseCount = milestonePhaseNums.size;
+  isDirInMilestone.missingExplicitVersion = missingExplicitVersion;
   return isDirInMilestone;
 }
 
@@ -1816,6 +2076,9 @@ function timeAgo(date) {
 module.exports = {
   output,
   error,
+  ERROR_REASON,
+  setJsonErrorMode,
+  getJsonErrorMode,
   safeReadFile,
   loadConfig,
   isGitIgnored,
@@ -1831,6 +2094,7 @@ module.exports = {
   getArchivedPhaseDirs,
   getRoadmapPhaseInternal,
   resolveModelInternal,
+  resolveModelForTier,
   resolveReasoningEffortInternal,
   RUNTIME_PROFILE_MAP,
   RUNTIMES_WITH_REASONING_EFFORT,

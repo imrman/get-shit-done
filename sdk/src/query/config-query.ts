@@ -16,10 +16,12 @@
  * ```
  */
 
+import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { GSDError, ErrorClassification } from '../errors.js';
 import { loadConfig } from '../config.js';
 import { planningPaths } from './helpers.js';
+import { maskIfSecret } from './secrets.js';
 import type { QueryHandler } from './utils.js';
 
 // ─── MODEL_PROFILES ─────────────────────────────────────────────────────────
@@ -129,7 +131,10 @@ export const configGet: QueryHandler = async (args, projectDir, workstream) => {
     throw new GSDError(`Key not found: ${keyPath}`, ErrorClassification.Execution);
   }
 
-  return { data: current };
+  // Mask plaintext for keys in SECRET_CONFIG_KEYS to match CJS behavior at
+  // config.cjs:440-441 — without this, `gsd-sdk query config-get brave_search`
+  // would echo the plaintext credential into machine-readable output. (#2997)
+  return { data: maskIfSecret(keyPath, current) };
 };
 
 // ─── configPath ─────────────────────────────────────────────────────────────
@@ -170,6 +175,8 @@ export const resolveModel: QueryHandler = async (args, projectDir, workstream) =
     throw new GSDError('agent-type required', ErrorClassification.Validation);
   }
 
+  const configFilePath = planningPaths(projectDir, workstream).config;
+  const configExists = existsSync(configFilePath);
   const config = await loadConfig(projectDir, workstream);
   const profile = String(config.model_profile || 'balanced').toLowerCase();
 
@@ -184,9 +191,9 @@ export const resolveModel: QueryHandler = async (args, projectDir, workstream) =
     return { data: result };
   }
 
-  // resolve_model_ids: "omit" -- return empty string
+  // No project config (or explicit omit policy) -> return empty model id (CJS parity)
   const resolveModelIds = (config as Record<string, unknown>).resolve_model_ids;
-  if (resolveModelIds === 'omit') {
+  if (!configExists || resolveModelIds === 'omit') {
     const agentModels = MODEL_PROFILES[agentType];
     const result = agentModels
       ? { model: '', profile }

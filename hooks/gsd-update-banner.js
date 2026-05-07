@@ -1,8 +1,14 @@
 #!/usr/bin/env node
 // gsd-hook-version: {{GSD_VERSION}}
 // SessionStart banner that surfaces GSD update availability when GSD's
-// statusline isn't installed. Reads the cache that gsd-check-update-worker.js
-// writes to ~/.cache/gsd/gsd-update-check.json.
+// statusline isn't installed. Reads the cache that
+// gsd-check-update-worker.js writes to ~/.cache/gsd/gsd-update-check.json.
+//
+// Opt-in by design: bin/install.js only registers this hook when the user
+// declines to install (or replace) the GSD statusline. The presence of the
+// SessionStart entry IS the opt-in — there is no separate runtime flag.
+//
+// See issue #2795 for the rationale.
 
 'use strict';
 
@@ -10,8 +16,20 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 
+// Suppress repeat parse-error banners for 24 hours so a genuinely broken
+// cache file doesn't nag the user every session.
 const RATE_LIMIT_SECONDS = 24 * 60 * 60;
 
+/**
+ * Build the SessionStart JSON envelope to emit, given parsed cache state.
+ * Pure function — no I/O. Returns null when the hook should print nothing.
+ *
+ * @param {object} state
+ * @param {object|null} state.cache                  Parsed cache, or null if missing/unreadable.
+ * @param {boolean}     state.parseError             True iff cache file existed but JSON.parse failed.
+ * @param {boolean}     state.suppressFailureWarning True when a recent failure warning already fired.
+ * @returns {{systemMessage: string}|null}           JSON envelope, or null for silent exit.
+ */
 function buildBannerOutput(state) {
   const { cache, parseError, suppressFailureWarning } = state || {};
   if (parseError) {
@@ -27,6 +45,12 @@ function buildBannerOutput(state) {
   };
 }
 
+/**
+ * Read and parse the update-check cache file.
+ *
+ * @param {string} cacheFile
+ * @returns {{cache: object|null, parseError: boolean}}
+ */
 function readCache(cacheFile) {
   let cache = null;
   let parseError = false;
@@ -36,11 +60,20 @@ function readCache(cacheFile) {
       cache = JSON.parse(raw);
     }
   } catch (e) {
+    // Distinguish "file unreadable" from "JSON malformed": both fail-open to
+    // null cache, but a JSON parse error becomes a one-time diagnostic.
     parseError = e instanceof SyntaxError;
   }
   return { cache, parseError };
 }
 
+/**
+ * Has a failure warning been emitted within the rate-limit window?
+ *
+ * @param {string} sentinelFile
+ * @param {number} nowSeconds
+ * @returns {boolean}
+ */
 function shouldSuppressFailureWarning(sentinelFile, nowSeconds) {
   try {
     if (!fs.existsSync(sentinelFile)) return false;
@@ -55,7 +88,10 @@ function shouldSuppressFailureWarning(sentinelFile, nowSeconds) {
 function recordFailureWarning(sentinelFile, nowSeconds) {
   try {
     fs.writeFileSync(sentinelFile, String(nowSeconds));
-  } catch (e) {}
+  } catch (e) {
+    // Best-effort: a non-writable cache dir means we'll re-warn next session,
+    // which is no worse than the un-instrumented baseline.
+  }
 }
 
 function main() {
@@ -71,9 +107,15 @@ function main() {
   const output = buildBannerOutput({ cache, parseError, suppressFailureWarning });
 
   if (parseError && !suppressFailureWarning) {
+    // Ensure cache dir exists before writing the sentinel — first-run case
+    // where ~/.cache/gsd was created by check-update but the parent dir got
+    // wiped between runs.
     try {
       fs.mkdirSync(cacheDir, { recursive: true });
-    } catch (e) {}
+    } catch (e) {
+      // Best-effort: failure to create the dir means we'll re-warn next
+      // session, which is no worse than the un-instrumented baseline.
+    }
     recordFailureWarning(sentinelFile, now);
   }
 

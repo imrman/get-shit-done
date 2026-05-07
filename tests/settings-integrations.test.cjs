@@ -1,5 +1,9 @@
 'use strict';
 
+// allow-test-rule: source-text-is-the-product
+// Reads .md/.json/.yml product files whose deployed text IS what the
+// runtime loads — testing text content tests the deployed contract.
+
 /**
  * #2529 — /gsd-settings-integrations: configure third-party search and review integrations.
  *
@@ -265,11 +269,15 @@ describe('#2529 config merge safety', () => {
 // ─── /gsd-settings mentions /gsd-settings-integrations ──────────────────────
 
 describe('#2529 /gsd-settings mentions new command', () => {
-  test('settings workflow mentions /gsd-settings-integrations in its confirmation output', () => {
+  test('settings workflow mentions canonical /gsd-config --integrations', () => {
     const src = fs.readFileSync(SETTINGS_WORKFLOW_PATH, 'utf-8');
     assert.ok(
-      src.includes('/gsd-settings-integrations'),
-      'settings.md must mention /gsd-settings-integrations as a follow-up'
+      src.includes('gsd-config --integrations'),
+      'settings.md must mention /gsd-config --integrations'
+    );
+    assert.ok(
+      !src.includes('/gsd-settings-integrations'),
+      'settings.md must not mention the legacy /gsd-settings-integrations variant'
     );
   });
 });

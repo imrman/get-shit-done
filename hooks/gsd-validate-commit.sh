@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # gsd-hook-version: {{GSD_VERSION}}
 # gsd-validate-commit.sh — PreToolUse hook: enforce Conventional Commits format
 # Blocks git commit commands with non-conforming messages (exit 2).
@@ -42,6 +42,8 @@ if GIT_CMD_LIB="$HOOK_DIR/lib/git-cmd.js" node -e "
     SUBJECT=$(echo "$MSG" | head -1)
     # Validate Conventional Commits format
     if ! [[ "$SUBJECT" =~ ^(feat|fix|docs|style|refactor|perf|test|build|ci|chore)(\(.+\))?:[[:space:]].+ ]]; then
+      # Emit a typed `code` field alongside `reason` (#2974). Tests assert
+      # on the stable code string; the reason is the human-readable copy.
       echo '{"decision": "block", "code": "CONVENTIONAL_COMMITS_VIOLATION", "reason": "Commit message must follow Conventional Commits: <type>(<scope>): <subject>. Valid types: feat, fix, docs, style, refactor, perf, test, build, ci, chore. Subject must be <=72 chars, lowercase, imperative mood, no trailing period."}'
       exit 2
     fi

@@ -55,7 +55,7 @@ GSD is a **meta-prompting framework** that sits between the user and AI coding a
 ┌──────▼──────────────▼─────────────────▼──────────────┐
 │              CLI TOOLS LAYER                          │
 │   gsd-sdk query (sdk/src/query) + gsd-tools.cjs       │
-│   (State, config, phase, roadmap, verify, templates)  │
+│   Programmatic SDK bridge: GSDTools/query-runtime-bridge.ts │
 └──────────────────────┬───────────────────────────────┘
                        │
 ┌──────────────────────▼───────────────────────────────┐
@@ -111,13 +111,24 @@ Multiple layers prevent common failure modes:
 
 User-facing entry points. Each file contains YAML frontmatter (name, description, allowed-tools) and a prompt body that bootstraps the workflow. Commands are installed as:
 
-- **Claude Code:** Custom slash commands (`/gsd-command-name`)
-- **OpenCode / Kilo:** Slash commands (`/gsd-command-name`)
+- **Claude Code:** Custom slash commands (hyphen form, `/gsd-command-name`)
+- **OpenCode / Kilo:** Slash commands (hyphen form, `/gsd-command-name`)
 - **Codex:** Skills (`$gsd-command-name`)
-- **Copilot:** Slash commands (`/gsd-command-name`)
+- **Copilot:** Slash commands (hyphen form, `/gsd-command-name`)
+- **Gemini CLI:** Slash commands under the `gsd:` namespace (colon form, `/gsd:command-name`) — Gemini namespaces all custom commands under their plugin id, so the install path rewrites every body-text reference to colon form
 - **Antigravity:** Skills
 
 **Total commands:** see [`docs/INVENTORY.md`](INVENTORY.md#commands) for the authoritative count and full roster.
+
+#### Two-stage hierarchical routing (v1.40, [#2792](https://github.com/gsd-build/get-shit-done/issues/2792))
+
+To keep the eager skill-listing token cost low, v1.40 introduces six namespace **meta-skills** (`gsd-workflow`, `gsd-project`, `gsd-review`, `gsd-context`, `gsd-manage`, `gsd-ideate` — sourced from `commands/gsd/ns-*.md`, but the invocable `name:` is the bare form shown here) layered above the concrete sub-skills. The model sees 6 namespace routers (~120 tokens) instead of a flat 86-skill listing (~2,150 tokens), selects a namespace, then routes to the concrete sub-skill via a routing table embedded in the namespace router's body. Namespace skills are **additive** — every concrete command is still directly invocable.
+
+The router descriptions use pipe-separated keyword tags (≤ 60 chars) per the Tool Attention research showing keyword-dense tags outperform prose for routing at ~40 % the token cost.
+
+#### MCP token-budget interaction
+
+The eager skill listing is one of two recurring per-turn token costs. The other is the MCP tool schema injected by every enabled MCP server in `.claude/settings.json`. Heavyweight MCP servers (browser/playwright, Mac-tools, Windows-tools) can each cost 20 k+ tokens per turn — often dwarfing what `model_profile` tuning saves. The toggle lives in the Claude Code harness (`enabledMcpjsonServers` / `disabledMcpjsonServers` in `.claude/settings.json`) and is **not** a GSD concern. Together, the two-stage routing layer (#2792) and disciplined MCP enablement are the largest cost levers per turn. See [`docs/USER-GUIDE.md`](USER-GUIDE.md) and `references/context-budget.md` for the audit checklist.
 
 ### Workflows (`get-shit-done/workflows/*.md`)
 
@@ -254,6 +265,17 @@ Runtime hooks that integrate with the host AI agent:
 | `gsd-phase-boundary.sh` | `PostToolUse` | Phase boundary detection for workflow transitions |
 
 See [`docs/INVENTORY.md`](INVENTORY.md#hooks-11-shipped) for the authoritative 11-hook roster.
+
+### SDK Runtime Bridge Module (`sdk/src/query-runtime-bridge.ts`)
+
+Programmatic SDK callers (`GSDTools`) route through one seam that owns query dispatch policy:
+
+- Native registry dispatch preference
+- Explicit subprocess fallback policy (`allowFallbackToSubprocess`)
+- Strict SDK mode (`strictSdk`) for fail-fast native-only enforcement
+- Structured dispatch observability (`onDispatchEvent`) with mode, reason, duration, and outcome
+
+This keeps callers thin adapters and centralizes transport decisions for SDK publishability.
 
 ### CLI Tools (`get-shit-done/bin/`)
 
@@ -524,7 +546,7 @@ Equivalent paths for other runtimes:
 │   ├── pending/            # Captured ideas
 │   └── done/               # Completed todos
 ├── threads/               # Persistent context threads (from /gsd-thread)
-├── seeds/                 # Forward-looking ideas (from /gsd-plant-seed)
+├── seeds/                 # Forward-looking ideas (from /gsd-capture --seed)
 ├── debug/                  # Active debug sessions
 │   ├── *.md                # Active sessions
 │   ├── resolved/           # Archived sessions
@@ -579,7 +601,7 @@ The installer (`bin/install.js`, ~3,000 lines) handles:
   - Augment Code: Skills-first with full skill conversion and config management
 5. **Path normalization** — Replaces `~/.claude/` paths with runtime-specific paths
 6. **Settings integration** — Registers hooks in runtime's `settings.json`
-7. **Patch backup** — Since v1.17, backs up locally modified files to `gsd-local-patches/` for `/gsd-reapply-patches`
+7. **Patch backup** — Since v1.17, backs up locally modified files to `gsd-local-patches/` for `/gsd-update --reapply`
 8. **Manifest tracking** — Writes `gsd-file-manifest.json` for clean uninstall
 9. **Uninstall mode** — `--uninstall` removes all GSD files, hooks, and settings
 
