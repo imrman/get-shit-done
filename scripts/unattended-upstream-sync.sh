@@ -4,6 +4,7 @@ set -euo pipefail
 BASE_BRANCH="main"
 DRY_RUN=0
 REQUIRE_PUSH=0
+REQUIRE_STABLE_UPSTREAM_REF=0
 SKIP_INSTALL=0
 LOCK_FILE=""
 LOG_DIR=""
@@ -35,7 +36,7 @@ usage() {
   cat <<EOF
 Usage: scripts/unattended-upstream-sync.sh [options]
 
-Fetch origin/main and upstream/main into a temporary worktree, merge upstream,
+Fetch origin/main and an upstream release ref into a temporary worktree, merge upstream,
 preserve local hardened security/automation files, validate, promote main, push,
 and reinstall GSD into the global Codex config from the validated source.
 
@@ -43,6 +44,9 @@ Options:
   --repo <path>           Repository checkout to coordinate from (default: cwd)
   --upstream-url <url>    Upstream repository URL (default: ${UPSTREAM_URL})
   --upstream-ref <ref>    Upstream ref to merge (default: ${UPSTREAM_REF})
+  --require-stable-upstream-ref
+                          Require --upstream-ref to be a stable release tag
+                          (vX.Y.Z or X.Y.Z; rejects branches and prereleases)
   --base-branch <branch>  Local/origin branch to update (default: ${BASE_BRANCH})
   --origin <remote>       Origin remote name (default: ${ORIGIN_REMOTE})
   --work-root <path>      Parent directory for temporary worktrees
@@ -76,6 +80,10 @@ while [ "$#" -gt 0 ]; do
     --base-branch)
       BASE_BRANCH="${2:?missing --base-branch value}"
       shift 2
+      ;;
+    --require-stable-upstream-ref)
+      REQUIRE_STABLE_UPSTREAM_REF=1
+      shift
       ;;
     --origin)
       ORIGIN_REMOTE="${2:?missing --origin value}"
@@ -272,6 +280,17 @@ is_preserved_path() {
     fi
   done
   return 1
+}
+
+require_stable_upstream_ref() {
+  local ref="$1"
+  local tag="${ref#refs/tags/}"
+
+  if [[ "$tag" =~ ^v?[0-9]+[.][0-9]+[.][0-9]+$ ]]; then
+    return 0
+  fi
+
+  fail "Upstream ref must be an official stable release tag (vX.Y.Z or X.Y.Z), got: $ref"
 }
 
 restore_path_from_base() {
@@ -496,6 +515,10 @@ log "Repository: $REPO_DIR"
 log "Origin: $ORIGIN_REMOTE/$BASE_BRANCH"
 log "Upstream: $UPSTREAM_URL $UPSTREAM_REF"
 log "Log file: $LOG_FILE"
+if [ "$REQUIRE_STABLE_UPSTREAM_REF" -eq 1 ]; then
+  require_stable_upstream_ref "$UPSTREAM_REF"
+  log "Stable upstream release ref required and accepted: $UPSTREAM_REF"
+fi
 if [ "$DRY_RUN" -eq 1 ]; then
   log "Dry run enabled; promotion, push, and install will be skipped"
 fi

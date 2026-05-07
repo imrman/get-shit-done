@@ -15,7 +15,7 @@ concurrency:
 env:
   BASE_BRANCH: main
   UPSTREAM_REPO: https://github.com/gsd-build/get-shit-done.git
-  UPSTREAM_REF: main
+  UPSTREAM_RELEASE_REPO: gsd-build/get-shit-done
 
 jobs:
   sync:
@@ -24,7 +24,7 @@ jobs:
     env:
       BASE_BRANCH: main
       UPSTREAM_REPO: https://github.com/gsd-build/get-shit-done.git
-      UPSTREAM_REF: main
+      UPSTREAM_RELEASE_REPO: gsd-build/get-shit-done
 
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
@@ -45,6 +45,43 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Resolve latest stable upstream release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          release_json="$(
+            gh release list \
+              --repo "$UPSTREAM_RELEASE_REPO" \
+              --exclude-drafts \
+              --exclude-pre-releases \
+              --limit 50 \
+              --json tagName,isDraft,isPrerelease,publishedAt
+          )"
+
+          stable_tag="$(
+            node -e '
+              const releases = JSON.parse(process.argv[1]);
+              const stable = releases.find((release) =>
+                release &&
+                release.isDraft === false &&
+                release.isPrerelease === false &&
+                /^v?[0-9]+[.][0-9]+[.][0-9]+$/.test(release.tagName || "")
+              );
+              if (stable) process.stdout.write(stable.tagName);
+            ' "$release_json"
+          )"
+
+          if [ -z "$stable_tag" ]; then
+            echo "::error::No stable upstream GitHub release tag found for ${UPSTREAM_RELEASE_REPO}"
+            exit 1
+          fi
+
+          echo "Resolved stable upstream release: ${stable_tag}"
+          printf 'UPSTREAM_REF=%s\n' "$stable_tag" >> "$GITHUB_ENV"
 
       - name: Sync upstream, build, test, scan, and update main
         shell: bash
@@ -73,5 +110,6 @@ jobs:
             --upstream-url "$UPSTREAM_REPO" \
             --upstream-ref "$UPSTREAM_REF" \
             --log-dir "$RUNNER_TEMP/gsd-upstream-sync" \
+            --require-stable-upstream-ref \
             --require-push \
             --skip-install

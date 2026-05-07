@@ -326,6 +326,43 @@ describe('unattended upstream sync script', () => {
     }
   });
 
+  test('stable-release mode rejects branch refs and prerelease refs before promotion or install', () => {
+    const unstableRefs = ['main', 'dev', 'v1.50.0-canary.0', '1.39.0-rc.7', 'refs/tags/v2.0.0-beta.1'];
+
+    for (const upstreamRef of unstableRefs) {
+      const fixture = setupRepos();
+
+      const result = runScript(fixture, [
+        '--require-stable-upstream-ref',
+        '--upstream-ref', upstreamRef,
+        '--skip-install',
+      ]);
+
+      assert.notEqual(result.status, 0, `expected ${upstreamRef} to be rejected`);
+      assert.match(result.stderr + result.stdout, /official stable release tag/);
+      assert.equal(showFromBare(fixture.originBare, 'main', 'README.md'), 'base readme');
+      assert.equal(fs.existsSync(fixture.installLog), false);
+    }
+  });
+
+  test('stable-release mode accepts stable release tag refs', () => {
+    const fixture = setupRepos();
+    const upstreamHead = git(['rev-parse', 'HEAD'], fixture.upstreamWork);
+    git(['tag', 'v9.9.9', upstreamHead], fixture.upstreamWork);
+    git(['push', 'origin', 'v9.9.9'], fixture.upstreamWork);
+
+    const result = runScript(fixture, [
+      '--require-stable-upstream-ref',
+      '--upstream-ref', 'v9.9.9',
+      '--skip-install',
+    ]);
+
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    assert.match(result.stdout, /Stable upstream release ref required and accepted: v9\.9\.9/);
+    assert.equal(showFromBare(fixture.originBare, 'main', 'README.md'), 'upstream readme');
+    assert.equal(fs.existsSync(fixture.installLog), false);
+  });
+
   test('preserves newer fetched origin hardening when local main is stale', () => {
     const fixture = setupRepos();
     const originWork = path.join(path.dirname(fixture.runner), 'origin-work');
