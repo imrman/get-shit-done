@@ -50,8 +50,6 @@ export class GSD {
   private readonly defaultMaxTurns: number;
   private readonly autoMode: boolean;
   private readonly workstream?: string;
-  private readonly strictSdk?: boolean;
-  private readonly allowFallbackToSubprocess?: boolean;
   readonly eventStream: GSDEventStream;
 
   constructor(options: GSDOptions) {
@@ -64,8 +62,6 @@ export class GSD {
     this.defaultMaxTurns = options.maxTurns ?? 50;
     this.autoMode = options.autoMode ?? false;
     this.workstream = options.workstream;
-    this.strictSdk = options.strictSdk;
-    this.allowFallbackToSubprocess = options.allowFallbackToSubprocess;
     this.eventStream = new GSDEventStream();
   }
 
@@ -132,16 +128,6 @@ export class GSD {
       workstream: this.workstream,
       eventStream: this.eventStream,
       sessionId: this.sessionId,
-      strictSdk: this.strictSdk,
-      allowFallbackToSubprocess: this.allowFallbackToSubprocess,
-      onDispatchEvent: (event) => {
-        this.eventStream.emitEvent({
-          type: GSDEventType.StreamEvent,
-          timestamp: new Date().toISOString(),
-          sessionId: this.sessionId ?? '',
-          event,
-        });
-      },
     });
   }
 

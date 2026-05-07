@@ -1,7 +1,3 @@
-// allow-test-rule: source-text-is-the-product
-// Reads .md/.json/.yml product files whose deployed text IS what the
-// runtime loads — testing text content tests the deployed contract.
-
 /**
  * GSD Tools Tests - State
  */
@@ -2470,61 +2466,6 @@ describe('state complete-phase: decorated Phase fallback (#2761 nitpick)', () =>
       updated.includes('**Status:** Phase 03 complete'),
       `Status should reference canonical Current Phase (03), got: ${updated}`,
     );
-  });
-
-  test('rejects unresolved literal Phase token and does not corrupt STATE.md (#3063)', () => {
-    const stateMd = [
-      '---',
-      'milestone: v1.0',
-      '---',
-      '',
-      '# State',
-      '',
-      '**Status:** Executing',
-      '**Last Activity:** 2024-01-15',
-      '',
-      '## Current Position',
-      '',
-      'Phase: narrative only',
-      '',
-    ].join('\n');
-    const statePath = path.join(tmpDir, '.planning', 'STATE.md');
-    fs.writeFileSync(statePath, stateMd);
-
-    const result = runGsdTools('state complete-phase', tmpDir);
-    assert.ok(result.success, 'command should return JSON error payload, not crash');
-    const output = JSON.parse(result.output);
-    assert.ok(output.error, 'expected clear resolution error');
-
-    const after = fs.readFileSync(statePath, 'utf-8');
-    assert.ok(!after.includes('Phase: Phase — COMPLETE'));
-    assert.ok(!after.includes('Status: Phase Phase complete'));
-  });
-
-  test('supports explicit phase override for complete-phase disambiguation (#3063)', () => {
-    const stateMd = [
-      '---',
-      'milestone: v1.0',
-      '---',
-      '',
-      '# State',
-      '',
-      '**Status:** Executing',
-      '**Last Activity:** 2024-01-15',
-      '',
-      '## Current Position',
-      '',
-      'Phase: narrative only',
-      '',
-    ].join('\n');
-    const statePath = path.join(tmpDir, '.planning', 'STATE.md');
-    fs.writeFileSync(statePath, stateMd);
-
-    const result = runGsdTools('state complete-phase --phase 3.3', tmpDir);
-    assert.ok(result.success, `Command failed: ${result.error}`);
-
-    const after = fs.readFileSync(statePath, 'utf-8');
-    assert.ok(after.includes('**Status:** Phase 3.3 complete'));
   });
 });
 

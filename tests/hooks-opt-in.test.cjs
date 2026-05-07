@@ -1,10 +1,3 @@
-// Migrated to typed-IR (#2974): the gsd-session-state.sh and
-// gsd-phase-boundary.sh hooks now emit Claude Code SessionStart/PostToolUse
-// JSON envelopes ({ hookSpecificOutput: { hookEventName, additionalContext,
-// state_present, config_mode | planning_modified, file_path } }) instead of
-// plain text. gsd-validate-commit.sh already emitted JSON ({ decision,
-// reason }). Tests parse the JSON and assert on typed fields.
-
 /**
  * GSD Tools Tests - Community Hooks (opt-in)
  *
@@ -271,11 +264,11 @@ describe('opt-in gating behavior', { skip: isWindows ? 'bash hooks require unix 
     });
 
     assert.strictEqual(result.status, 0, `Should exit 0: ${result.stderr}`);
-    // Migrated #2974: typed assertion that stdout is empty (no JSON envelope
-    // emitted when the hook is a no-op). The previous shape grepped for
-    // "Project State Reminder" prose; now the contract is "no output".
-    assert.equal(result.stdout.trim(), '',
-      `Should produce no output when disabled: ${JSON.stringify(result.stdout)}`);
+    // Should NOT output state info when disabled
+    assert.ok(
+      !result.stdout.includes('Project State Reminder'),
+      `Should not output state reminder when disabled: ${result.stdout}`
+    );
   });
 
   test('phase-boundary is a no-op when hooks.community is false', () => {
@@ -292,9 +285,10 @@ describe('opt-in gating behavior', { skip: isWindows ? 'bash hooks require unix 
     });
 
     assert.strictEqual(result.status, 0, `Should exit 0: ${result.stderr}`);
-    // Migrated #2974: typed empty-stdout assertion (#2974).
-    assert.equal(result.stdout.trim(), '',
-      `Should produce no output when disabled: ${JSON.stringify(result.stdout)}`);
+    assert.ok(
+      !result.stdout.includes('.planning/ file modified'),
+      `Should not output warning when disabled: ${result.stdout}`
+    );
   });
 });
 
@@ -342,18 +336,8 @@ describe('hook execution when enabled', { skip: isWindows ? 'bash hooks require 
     });
 
     assert.strictEqual(result.status, 2, `Non-conventional commit should exit 2, got ${result.status}`);
-    // Migrated #2974: parse the hook's JSON envelope and assert on typed
-    // fields (decision, reason). Hook protocol returns
-    // { decision: 'block', reason: '...' } for blocked commits.
-    const parsed = JSON.parse(result.stdout);
-    assert.strictEqual(parsed.decision, 'block',
-      `expected typed decision: 'block', got: ${JSON.stringify(parsed)}`);
-    // Assert on the typed `code` field (stable enum value), not the
-    // human-readable `reason` string. CR feedback (#3016): substring
-    // matching on `reason` is still text matching — the hook now emits
-    // a typed code alongside the prose so tests pin behavior, not copy.
-    assert.strictEqual(parsed.code, 'CONVENTIONAL_COMMITS_VIOLATION',
-      `expected typed code: 'CONVENTIONAL_COMMITS_VIOLATION', got: ${JSON.stringify(parsed)}`);
+    assert.ok(result.stdout.includes('block'), `stdout should contain "block": ${result.stdout}`);
+    assert.ok(result.stdout.includes('Conventional Commits'), `stdout should mention "Conventional Commits": ${result.stdout}`);
   });
 
   test('validate-commit allows non-commit commands', () => {
@@ -382,13 +366,10 @@ describe('hook execution when enabled', { skip: isWindows ? 'bash hooks require 
     });
 
     assert.strictEqual(result.status, 0, `Should exit 0: ${result.stderr}`);
-    // Migrated #2974: parse the SessionStart JSON envelope and assert on
-    // typed fields. The hook now emits
-    // { hookSpecificOutput: { hookEventName, additionalContext, state_present, config_mode } }.
-    const parsed = JSON.parse(result.stdout);
-    assert.strictEqual(parsed.hookSpecificOutput.hookEventName, 'SessionStart');
-    assert.strictEqual(parsed.hookSpecificOutput.state_present, true,
-      'state_present must reflect that STATE.md was written by writeMinimalStateMd');
+    assert.ok(
+      result.stdout.includes('STATE.md exists'),
+      `stdout should contain "STATE.md exists": ${result.stdout}`
+    );
   });
 
   test('session-state exits 0 without .planning/ (in enabled project)', (t) => {
@@ -406,11 +387,10 @@ describe('hook execution when enabled', { skip: isWindows ? 'bash hooks require 
     });
 
     assert.strictEqual(result.status, 0, `Should exit 0: ${result.stderr}`);
-    // Migrated #2974: typed assertion on state_present field instead of
-    // grepping additionalContext text for "No .planning/ found".
-    const parsed = JSON.parse(result.stdout);
-    assert.strictEqual(parsed.hookSpecificOutput.state_present, false,
-      'state_present must be false when STATE.md is absent');
+    assert.ok(
+      result.stdout.includes('No .planning/ found') || result.stdout.includes('Project State'),
+      `Should handle missing STATE.md gracefully: ${result.stdout}`
+    );
   });
 
   test('phase-boundary detects .planning/ writes when enabled', () => {
@@ -426,13 +406,10 @@ describe('hook execution when enabled', { skip: isWindows ? 'bash hooks require 
     });
 
     assert.strictEqual(result.status, 0, `Should exit 0: ${result.stderr}`);
-    // Migrated #2974: parse the PostToolUse JSON envelope. The hook emits
-    // { hookSpecificOutput: { hookEventName, additionalContext,
-    //   planning_modified, file_path } } when a .planning/ write is detected.
-    const parsed = JSON.parse(result.stdout);
-    assert.strictEqual(parsed.hookSpecificOutput.hookEventName, 'PostToolUse');
-    assert.strictEqual(parsed.hookSpecificOutput.planning_modified, true);
-    assert.strictEqual(parsed.hookSpecificOutput.file_path, '.planning/STATE.md');
+    assert.ok(
+      result.stdout.includes('.planning/ file modified'),
+      `stdout should contain ".planning/ file modified": ${result.stdout}`
+    );
   });
 });
 
@@ -465,8 +442,7 @@ describe('hook security tests', { skip: isWindows ? 'bash hooks require unix she
     });
 
     assert.strictEqual(result.status, 2, `Shell metacharacter message should be blocked: ${result.status}`);
-    // Migrated #2974: typed JSON envelope assertion (parsed.decision === 'block').
-    assert.strictEqual(JSON.parse(result.stdout).decision, 'block');
+    assert.ok(result.stdout.includes('block'), `stdout should contain "block": ${result.stdout}`);
   });
 
   test('validate-commit blocks message with backtick injection', () => {
@@ -482,8 +458,7 @@ describe('hook security tests', { skip: isWindows ? 'bash hooks require unix she
     });
 
     assert.strictEqual(result.status, 2, `Backtick injection should be blocked: ${result.status}`);
-    // Migrated #2974: typed JSON envelope assertion (parsed.decision === 'block').
-    assert.strictEqual(JSON.parse(result.stdout).decision, 'block');
+    assert.ok(result.stdout.includes('block'), `stdout should contain "block": ${result.stdout}`);
   });
 
   test('validate-commit allows commit with scope containing special chars', () => {

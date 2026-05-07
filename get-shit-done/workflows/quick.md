@@ -128,8 +128,8 @@ If `$VALIDATE_MODE` only:
 if ! command -v gsd-sdk &>/dev/null; then
   echo "⚠ gsd-sdk not found in PATH — /gsd-quick requires it."
   echo ""
-  echo "Install the query-capable GSD SDK CLI:"
-  echo "  npm install -g get-shit-done-cc"
+  echo "Install the GSD SDK:"
+  echo "  npm install -g @gsd-build/sdk"
   echo ""
   echo "Or update GSD to get the latest packages:"
   echo "  /gsd-update"
@@ -402,7 +402,7 @@ Display banner:
 Spawn a single focused researcher (not 4 parallel researchers like full phases — quick tasks need targeted research, not broad domain surveys):
 
 ```
-Agent(
+Task(
   prompt="
 <research_context>
 
@@ -443,7 +443,7 @@ Return: ## RESEARCH COMPLETE with file path
 )
 ```
 
-> **ORCHESTRATOR RULE — CODEX RUNTIME**: After calling Agent() above, stop working on this task immediately. Do not read more files, edit code, or run tests related to this task while the subagent is active. Wait for the subagent to return its result. This prevents duplicate work, conflicting edits, and wasted context. Only resume when the subagent result is available.
+> **ORCHESTRATOR RULE — CODEX RUNTIME**: After calling Task() above, stop working on this task immediately. Do not read more files, edit code, or run tests related to this task while the subagent is active. Wait for the subagent to return its result. This prevents duplicate work, conflicting edits, and wasted context. Only resume when the subagent result is available.
 
 After researcher returns:
 1. Verify research exists at `${QUICK_DIR}/${quick_id}-RESEARCH.md`
@@ -460,7 +460,7 @@ If research file not found, warn but continue: "Research agent did not produce o
 **If NOT `$VALIDATE_MODE`:** Use standard `quick` mode.
 
 ```
-Agent(
+Task(
   prompt="
 <planning_context>
 
@@ -501,7 +501,7 @@ Return: ## PLANNING COMPLETE with plan path
 )
 ```
 
-> **ORCHESTRATOR RULE — CODEX RUNTIME**: After calling Agent() above, stop working on this task immediately. Do not read more files, edit code, or run tests related to this task while the subagent is active. Wait for the subagent to return its result. This prevents duplicate work, conflicting edits, and wasted context. Only resume when the subagent result is available.
+> **ORCHESTRATOR RULE — CODEX RUNTIME**: After calling Task() above, stop working on this task immediately. Do not read more files, edit code, or run tests related to this task while the subagent is active. Wait for the subagent to return its result. This prevents duplicate work, conflicting edits, and wasted context. Only resume when the subagent result is available.
 
 After planner returns:
 1. Verify plan exists at `${QUICK_DIR}/${quick_id}-PLAN.md`
@@ -559,7 +559,7 @@ ${DISCUSS_MODE ? '- Context compliance: Does the plan honor locked decisions fro
 ```
 
 ```
-Agent(
+Task(
   prompt=checker_prompt,
   subagent_type="gsd-plan-checker",
   model="{checker_model}",
@@ -567,7 +567,7 @@ Agent(
 )
 ```
 
-> **ORCHESTRATOR RULE — CODEX RUNTIME**: After calling Agent() above, stop working on this task immediately. Do not read more files, edit code, or run tests related to this task while the subagent is active. Wait for the subagent to return its result. This prevents duplicate work, conflicting edits, and wasted context. Only resume when the subagent result is available.
+> **ORCHESTRATOR RULE — CODEX RUNTIME**: After calling Task() above, stop working on this task immediately. Do not read more files, edit code, or run tests related to this task while the subagent is active. Wait for the subagent to return its result. This prevents duplicate work, conflicting edits, and wasted context. Only resume when the subagent result is available.
 
 **Handle checker return:**
 
@@ -606,7 +606,7 @@ Return what changed.
 ```
 
 ```
-Agent(
+Task(
   prompt=revision_prompt,
   subagent_type="gsd-planner",
   model="{planner_model}",
@@ -614,7 +614,7 @@ Agent(
 )
 ```
 
-> **ORCHESTRATOR RULE — CODEX RUNTIME**: After calling Agent() above, stop working on this task immediately. Do not read more files, edit code, or run tests related to this task while the subagent is active. Wait for the subagent to return its result. This prevents duplicate work, conflicting edits, and wasted context. Only resume when the subagent result is available.
+> **ORCHESTRATOR RULE — CODEX RUNTIME**: After calling Task() above, stop working on this task immediately. Do not read more files, edit code, or run tests related to this task while the subagent is active. Wait for the subagent to return its result. This prevents duplicate work, conflicting edits, and wasted context. Only resume when the subagent result is available.
 
 After planner returns → spawn checker again, increment iteration_count.
 
@@ -637,21 +637,7 @@ if [ "${USE_WORKTREES}" != "false" ]; then
   COMMIT_DOCS=$(gsd-sdk query config-get commit_docs 2>/dev/null || echo "true")
   if [ "$COMMIT_DOCS" != "false" ]; then
     git add "${QUICK_DIR}/${quick_id}-PLAN.md"
-    # No-op skip if nothing actually staged (idempotent re-runs).
-    if git diff --cached --quiet -- "${QUICK_DIR}/${quick_id}-PLAN.md"; then
-      echo "ℹ Pre-dispatch PLAN.md commit skipped (no staged changes)"
-    else
-      # Run hooks normally (#2924). If a project opts out via
-      # workflow.worktree_skip_hooks=true, honor that opt-in only.
-      SKIP_HOOKS=$(gsd-sdk query config-get workflow.worktree_skip_hooks 2>/dev/null || echo "false")
-      if [ "$SKIP_HOOKS" = "true" ]; then
-        git commit --no-verify -m "docs(${quick_id}): pre-dispatch plan for ${DESCRIPTION}" -- "${QUICK_DIR}/${quick_id}-PLAN.md" \
-          || { echo "ERROR: pre-dispatch PLAN.md commit failed (--no-verify path). Aborting before executor dispatch." >&2; exit 1; }
-      else
-        git commit -m "docs(${quick_id}): pre-dispatch plan for ${DESCRIPTION}" -- "${QUICK_DIR}/${quick_id}-PLAN.md" \
-          || { echo "ERROR: pre-dispatch PLAN.md commit failed — likely a pre-commit hook failure. Fix the hook output above (or set workflow.worktree_skip_hooks=true to bypass) and re-run." >&2; exit 1; }
-      fi
-    fi
+    git commit --no-verify -m "docs(${quick_id}): pre-dispatch plan for ${DESCRIPTION}" -- "${QUICK_DIR}/${quick_id}-PLAN.md" || true
   fi
 fi
 ```
@@ -668,37 +654,18 @@ EXPECTED_BASE=$(git rev-parse HEAD)
 Spawn gsd-executor with plan reference:
 
 ```
-Agent(
+Task(
   prompt="
 Execute quick task ${quick_id}.
 
 ${USE_WORKTREES !== "false" ? `
 <worktree_branch_check>
-FIRST ACTION before any other work: verify this worktree's HEAD is bound to a per-agent
-branch and that the branch is based on the correct commit.
-
-Step 1 — HEAD attachment assertion (MANDATORY, runs before any reset/commit):
-  HEAD_REF=$(git symbolic-ref --quiet HEAD || echo "DETACHED")
-  ACTUAL_BRANCH=$(git rev-parse --abbrev-ref HEAD)
-  if [ "$HEAD_REF" = "DETACHED" ] || echo "$ACTUAL_BRANCH" | grep -Eq '^(main|master|develop|trunk|release/.*)$'; then
-    echo "FATAL: worktree HEAD is on '$ACTUAL_BRANCH' (expected per-agent branch like worktree-agent-*)." >&2
-    echo "Refusing to commit/reset on a protected ref. DO NOT self-recover via 'git update-ref refs/heads/$ACTUAL_BRANCH' — that destroys concurrent work (#2924)." >&2
-    echo "Aborting before any commits. Surface as a blocker for human review." >&2
-    exit 1
-  fi
-  if ! echo "$ACTUAL_BRANCH" | grep -Eq '^worktree-agent-[A-Za-z0-9._/-]+$'; then
-    echo "FATAL: worktree HEAD '$ACTUAL_BRANCH' is not in the worktree-agent-* namespace (Claude Code's per-agent worktree branch namespace)." >&2
-    echo "Refusing to commit; surface as blocker (#2924)." >&2
-    exit 1
-  fi
-
-Step 2 — Base correctness (only after Step 1 passes):
-  Run: git merge-base HEAD ${EXPECTED_BASE}
-  If the result differs from ${EXPECTED_BASE}, hard-reset to the correct base (safe — Step 1 confirmed HEAD is on a per-agent branch and the worktree is fresh):
-    git reset --hard ${EXPECTED_BASE}
-  Then verify: if [ "$(git rev-parse HEAD)" != "${EXPECTED_BASE}" ]; then echo "ERROR: Could not correct worktree base"; exit 1; fi
-
-This corrects a known issue where EnterWorktree creates branches from main instead of the feature branch HEAD (#2015) and prevents the destructive HEAD-on-master self-recovery path (#2924).
+FIRST ACTION before any other work: verify this worktree branch is based on the correct commit.
+Run: git merge-base HEAD ${EXPECTED_BASE}
+If the result differs from ${EXPECTED_BASE}, hard-reset to the correct base (safe — runs before any agent work):
+  git reset --hard ${EXPECTED_BASE}
+Then verify: if [ "$(git rev-parse HEAD)" != "${EXPECTED_BASE}" ]; then echo "ERROR: Could not correct worktree base"; exit 1; fi
+This corrects a known issue where EnterWorktree creates branches from main instead of the feature branch HEAD (affects all platforms).
 </worktree_branch_check>
 ` : ''}
 
@@ -761,7 +728,7 @@ SUMMARY.md and stop — the user must rerun with worktrees disabled.
 )
 ```
 
-> **ORCHESTRATOR RULE — CODEX RUNTIME**: After calling Agent() above, stop working on this task immediately. Do not read more files, edit code, or run tests related to this task while the subagent is active. Wait for the subagent to return its result. This prevents duplicate work, conflicting edits, and wasted context. Only resume when the subagent result is available.
+> **ORCHESTRATOR RULE — CODEX RUNTIME**: After calling Task() above, stop working on this task immediately. Do not read more files, edit code, or run tests related to this task while the subagent is active. Wait for the subagent to return its result. This prevents duplicate work, conflicting edits, and wasted context. Only resume when the subagent result is available.
 
 After executor returns:
 1. **Worktree cleanup:** If the executor ran with `isolation="worktree"`, merge the worktree branch back and clean up:
@@ -785,6 +752,9 @@ After executor returns:
        [ -f .planning/STATE.md ] && cp .planning/STATE.md "$STATE_BACKUP" || true
        [ -f .planning/ROADMAP.md ] && cp .planning/ROADMAP.md "$ROADMAP_BACKUP" || true
 
+       # Snapshot files on main to detect resurrections
+       PRE_MERGE_FILES=$(git ls-files .planning/)
+
        # Pre-merge deletion guard: block merges that delete tracked .planning/ files
        DELETIONS=$(git diff --diff-filter=D --name-only HEAD..."$WT_BRANCH" 2>/dev/null || true)
        if [ -n "$DELETIONS" ]; then
@@ -807,17 +777,10 @@ After executor returns:
        if [ -s "$ROADMAP_BACKUP" ]; then cp "$ROADMAP_BACKUP" .planning/ROADMAP.md; fi
        rm -f "$STATE_BACKUP" "$ROADMAP_BACKUP"
 
-       # Detect files deleted on main but re-added by worktree merge
-       # (e.g., archived phase directories that were intentionally removed)
-       # A "resurrected" file must have a deletion event in main's ancestry —
-       # brand-new files (e.g. SUMMARY.md just created by the agent) have no
-       # such history and must NOT be removed (#2501, #3195).
+       # Remove files deleted on main but re-added by worktree (--no-ff guarantees a merge commit so HEAD~1 is reliable)
        DELETED_FILES=$(git diff --diff-filter=A --name-only HEAD~1 -- .planning/ 2>/dev/null || true)
        for RESURRECTED in $DELETED_FILES; do
-         # Only delete if this file was previously tracked on main and then
-         # deliberately removed (has a deletion event in git history).
-         WAS_DELETED=$(git log --follow --diff-filter=D --name-only --format="" HEAD~1 -- "$RESURRECTED" 2>/dev/null | grep -c . || true)
-         if [ "${WAS_DELETED:-0}" -gt 0 ]; then
+         if ! echo "$PRE_MERGE_FILES" | grep -qxF "$RESURRECTED"; then
            git rm -f "$RESURRECTED" 2>/dev/null || true
          fi
        done
@@ -911,7 +874,7 @@ If `CHANGED_FILES` is empty, skip with "No source files changed — skipping cod
 
 **Invoke review:**
 ```
-Agent(
+Task(
   prompt="Review these files for bugs, security issues, and code quality.
   Files: ${CHANGED_FILES}
   Output: ${QUICK_DIR}/${quick_id}-REVIEW.md
@@ -921,7 +884,7 @@ Agent(
 )
 ```
 
-> **ORCHESTRATOR RULE — CODEX RUNTIME**: After calling Agent() above, stop working on this task immediately. Do not read more files, edit code, or run tests related to this task while the subagent is active. Wait for the subagent to return its result. This prevents duplicate work, conflicting edits, and wasted context. Only resume when the subagent result is available.
+> **ORCHESTRATOR RULE — CODEX RUNTIME**: After calling Task() above, stop working on this task immediately. Do not read more files, edit code, or run tests related to this task while the subagent is active. Wait for the subagent to return its result. This prevents duplicate work, conflicting edits, and wasted context. Only resume when the subagent result is available.
 
 If review produces findings, display advisory message. **Error handling:** Failures are non-blocking — catch and proceed.
 
@@ -941,7 +904,7 @@ Display banner:
 ```
 
 ```
-Agent(
+Task(
   prompt="Verify quick task goal achievement.
 Task directory: ${QUICK_DIR}
 Task goal: ${DESCRIPTION}
@@ -959,7 +922,7 @@ Check must_haves against actual codebase. Create VERIFICATION.md at ${QUICK_DIR}
 )
 ```
 
-> **ORCHESTRATOR RULE — CODEX RUNTIME**: After calling Agent() above, stop working on this task immediately. Do not read more files, edit code, or run tests related to this task while the subagent is active. Wait for the subagent to return its result. This prevents duplicate work, conflicting edits, and wasted context. Only resume when the subagent result is available.
+> **ORCHESTRATOR RULE — CODEX RUNTIME**: After calling Task() above, stop working on this task immediately. Do not read more files, edit code, or run tests related to this task while the subagent is active. Wait for the subagent to return its result. This prevents duplicate work, conflicting edits, and wasted context. Only resume when the subagent result is available.
 
 Read verification status:
 ```bash

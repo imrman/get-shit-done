@@ -1,7 +1,3 @@
-// allow-test-rule: source-text-is-the-product
-// Reads .md/.json/.yml product files whose deployed text IS what the
-// runtime loads — testing text content tests the deployed contract.
-
 /**
  * GSD Tools Tests - Roadmap
  */
@@ -704,31 +700,6 @@ describe('roadmap update-plan-progress command', () => {
     // Verify file was actually modified
     const roadmapContent = fs.readFileSync(path.join(tmpDir, '.planning', 'ROADMAP.md'), 'utf-8');
     assert.ok(roadmapContent.includes('1/2'), 'roadmap should contain updated plan count');
-  });
-
-  test('counts plans and summaries from plans/ subdirectory layout (#3053)', () => {
-    fs.writeFileSync(
-      path.join(tmpDir, '.planning', 'ROADMAP.md'),
-      `# Roadmap
-
-### Phase 1: Test
-**Goal:** Test goal
-`
-    );
-
-    const p1 = path.join(tmpDir, '.planning', 'phases', '01-test', 'plans');
-    fs.mkdirSync(p1, { recursive: true });
-    fs.writeFileSync(path.join(p1, 'PLAN-01.md'), '# Plan 1');
-    fs.writeFileSync(path.join(p1, 'PLAN-02.md'), '# Plan 2');
-    fs.writeFileSync(path.join(p1, 'SUMMARY-01.md'), '# Summary 1');
-
-    const result = runGsdTools('roadmap analyze', tmpDir);
-    assert.ok(result.success, `Command failed: ${result.error}`);
-
-    const output = JSON.parse(result.output);
-    assert.strictEqual(output.phases[0].plan_count, 2);
-    assert.strictEqual(output.phases[0].summary_count, 1);
-    assert.strictEqual(output.phases[0].disk_status, 'partial');
   });
 
   test('updates progress and checks checkbox on completion', () => {

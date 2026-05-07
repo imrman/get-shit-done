@@ -26,7 +26,6 @@ const VALID_CONFIG_KEYS = new Set([
   'workflow.skip_discuss',
   'workflow.auto_prune_state',
   'workflow.use_worktrees',
-  'workflow.worktree_skip_hooks',
   'workflow.code_review',
   'workflow.code_review_depth',
   'workflow.code_review_command',
@@ -69,18 +68,6 @@ const VALID_CONFIG_KEYS = new Set([
   'claude_md_assembly.mode',
   // #2517 — runtime-aware model profiles
   'runtime',
-  // #3162 — documented top-level key: controls model ID resolution for non-Claude runtimes
-  'resolve_model_ids',
-]);
-
-/**
- * Internal runtime-state keys — accepted by config-set (workflows write them) but not
- * exposed as user-settable options.  Excluded from VALID_CONFIG_KEYS so they stay out of
- * the public docs-parity check and the "Valid keys:" error message.
- * See: #3162 (workflow._auto_chain_active written by plan/execute/discuss workflows)
- */
-const RUNTIME_STATE_KEYS = new Set([
-  'workflow._auto_chain_active',
 ]);
 
 /**
@@ -96,26 +83,14 @@ const DYNAMIC_KEY_PATTERNS = [
   // <runtime> is a free string (so users can map non-built-in runtimes); <tier> is enum-restricted.
   { topLevel: 'model_profile_overrides', test: (k) => /^model_profile_overrides\.[a-zA-Z0-9_-]+\.(opus|sonnet|haiku)$/.test(k),
     description: 'model_profile_overrides.<runtime>.<opus|sonnet|haiku>' },
-  // #3023 — per-phase-type model map: models.<phase_type> = <tier>
-  // Six named slots (planning/discuss/research/execution/verification/completion);
-  // unknown phase-types are rejected. Per-agent model_overrides still take
-  // precedence over phase-type at resolve time.
-  { topLevel: 'models', test: (k) => /^models\.(planning|discuss|research|execution|verification|completion)$/.test(k),
-    description: 'models.<planning|discuss|research|execution|verification|completion>' },
-  // #3024 — dynamic routing block. Three top-level scalar settings
-  // plus a tier_models sub-block keyed by light/standard/heavy.
-  { topLevel: 'dynamic_routing',
-    test: (k) => /^dynamic_routing\.(enabled|escalate_on_failure|max_escalations|tier_models\.(light|standard|heavy))$/.test(k),
-    description: 'dynamic_routing.<enabled|escalate_on_failure|max_escalations|tier_models.<light|standard|heavy>>' },
 ];
 
 /**
- * Returns true if keyPath is a valid config key (exact, dynamic pattern, or runtime state).
+ * Returns true if keyPath is a valid config key (exact or dynamic pattern).
  */
 function isValidConfigKey(keyPath) {
   if (VALID_CONFIG_KEYS.has(keyPath)) return true;
-  if (RUNTIME_STATE_KEYS.has(keyPath)) return true;
   return DYNAMIC_KEY_PATTERNS.some((p) => p.test(keyPath));
 }
 
-module.exports = { VALID_CONFIG_KEYS, RUNTIME_STATE_KEYS, DYNAMIC_KEY_PATTERNS, isValidConfigKey };
+module.exports = { VALID_CONFIG_KEYS, DYNAMIC_KEY_PATTERNS, isValidConfigKey };

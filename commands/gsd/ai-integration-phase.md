@@ -8,7 +8,7 @@ allowed-tools:
   - Bash
   - Glob
   - Grep
-  - Agent
+  - Task
   - WebFetch
   - WebSearch
   - AskUserQuestion
@@ -31,6 +31,6 @@ Phase number: $ARGUMENTS — optional, auto-detects next unplanned phase if omit
 </context>
 
 <process>
-Execute end-to-end.
+Execute @~/.claude/get-shit-done/workflows/ai-integration-phase.md end-to-end.
 Preserve all workflow gates.
 </process>

@@ -9,7 +9,7 @@ allowed-tools:
   - Glob
   - Grep
   - AskUserQuestion
-  - Agent
+  - Task
 ---
 
 <objective>

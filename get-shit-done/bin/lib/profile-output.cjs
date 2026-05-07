@@ -776,17 +776,9 @@ function cmdGenerateDevPreferences(cwd, options, raw) {
   }
   template = template.replace(/\{\{stack_preferences\}\}/g, stackBlock);
 
-  // #2973: v1.39.0's skills-only migration removed the legacy
-  // commands/gsd subdirectory in favor of skills/<skill>/SKILL.md under
-  // the runtime config dir. This writer was missed in the migration
-  // (PR #1540 targeted GSD-shipped command files; dev-preferences is a
-  // runtime-generated user artifact). Default now points at the skills/
-  // location so /gsd-profile-user --refresh stops re-creating the legacy
-  // directory. The path is constructed via path.join (not a literal
-  // string) so the cline-install leaked-path lint does not flag it.
   let outputPath = options.output;
   if (!outputPath) {
-    outputPath = path.join(os.homedir(), '.claude', 'skills', 'gsd-dev-preferences', 'SKILL.md');
+    outputPath = path.join(os.homedir(), '.claude', 'commands', 'gsd', 'dev-preferences.md');
   } else if (!path.isAbsolute(outputPath)) {
     outputPath = path.join(cwd, outputPath);
   }
@@ -965,13 +957,6 @@ function cmdGenerateClaudeMd(cwd, options, raw) {
     const config = loadConfig(cwd);
     if (config.claude_md_path) configClaudeMdPath = config.claude_md_path;
     if (config.claude_md_assembly) assemblyConfig = config.claude_md_assembly;
-    // #3163: When runtime is codex, override the output target to AGENTS.md
-    // regardless of claude_md_path, so Codex projects never write to CLAUDE.md.
-    // GSD_RUNTIME env var takes precedence over config.runtime, mirroring detectRuntime().
-    const effectiveRuntime = process.env.GSD_RUNTIME || config.runtime || null;
-    if (!options.output && effectiveRuntime === 'codex') {
-      configClaudeMdPath = './AGENTS.md';
-    }
   } catch { /* use default */ }
 
   let outputPath = options.output;

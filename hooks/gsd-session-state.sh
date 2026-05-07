@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 # gsd-hook-version: {{GSD_VERSION}}
 # gsd-session-state.sh — SessionStart hook: inject project state reminder
 # Outputs STATE.md head on every session start for orientation.
@@ -14,46 +14,21 @@ else
   exit 0
 fi
 
-# Build the additionalContext text and emit it as a structured JSON
-# envelope per the Claude Code SessionStart hook protocol (#2974). Tests
-# parse the JSON and assert on typed fields (state_present: bool,
-# config_mode: string, etc) rather than substring-matching free-form text.
-STATE_PRESENT="false"
-STATE_HEAD=""
+echo '## Project State Reminder'
+echo ''
+
 if [ -f .planning/STATE.md ]; then
-  STATE_PRESENT="true"
-  STATE_HEAD=$(head -20 .planning/STATE.md)
+  echo 'STATE.md exists - check for blockers and current phase.'
+  head -20 .planning/STATE.md
+else
+  echo 'No .planning/ found - suggest /gsd-new-project if starting new work.'
 fi
 
-CONFIG_MODE="unknown"
+echo ''
+
 if [ -f .planning/config.json ]; then
-  CONFIG_MODE=$(node -e "try{const c=require('./.planning/config.json');process.stdout.write(String(c.mode||'unknown'))}catch{process.stdout.write('unknown')}" 2>/dev/null)
+  MODE=$(grep -o '"mode"[[:space:]]*:[[:space:]]*"[^"]*"' .planning/config.json 2>/dev/null || echo '"mode": "unknown"')
+  echo "Config: $MODE"
 fi
-
-# Use Node for JSON encoding so embedded newlines/quotes are escaped correctly.
-# additionalContext is the text Claude Code injects at session start; the
-# typed fields (state_present, config_mode) let tests assert on the
-# structured contract without grepping the prose.
-node -e '
-  const [statePresent, stateHead, configMode] = process.argv.slice(1);
-  const headerLines = ["## Project State Reminder", ""];
-  if (statePresent === "true") {
-    headerLines.push("STATE.md exists - check for blockers and current phase.");
-    if (stateHead) headerLines.push(stateHead);
-  } else {
-    headerLines.push("No .planning/ found - suggest /gsd-new-project if starting new work.");
-  }
-  headerLines.push("");
-  headerLines.push("Config: \"mode\": \"" + configMode + "\"");
-  const additionalContext = headerLines.join("\n");
-  process.stdout.write(JSON.stringify({
-    hookSpecificOutput: {
-      hookEventName: "SessionStart",
-      additionalContext,
-      state_present: statePresent === "true",
-      config_mode: configMode,
-    },
-  }));
-' "$STATE_PRESENT" "$STATE_HEAD" "$CONFIG_MODE"
 
 exit 0

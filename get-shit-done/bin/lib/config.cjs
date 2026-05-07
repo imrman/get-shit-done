@@ -4,7 +4,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { output, error, ERROR_REASON, CONFIG_DEFAULTS, atomicWriteFileSync } = require('./core.cjs');
+const { output, error, CONFIG_DEFAULTS, atomicWriteFileSync } = require('./core.cjs');
 const { planningDir, withPlanningLock } = require('./planning-workspace.cjs');
 const {
   VALID_PROFILES,
@@ -33,7 +33,7 @@ const CONFIG_KEY_SUGGESTIONS = {
 function validateKnownConfigKeyPath(keyPath) {
   const suggested = CONFIG_KEY_SUGGESTIONS[keyPath];
   if (suggested) {
-    error(`Unknown config key: ${keyPath}. Did you mean ${suggested}?`, ERROR_REASON.CONFIG_INVALID_KEY);
+    error(`Unknown config key: ${keyPath}. Did you mean ${suggested}?`);
   }
 }
 
@@ -278,7 +278,7 @@ function setConfigValue(cwd, keyPath, parsedValue) {
         config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
       }
     } catch (err) {
-      error('Failed to read config.json: ' + err.message, ERROR_REASON.CONFIG_PARSE_FAILED);
+      error('Failed to read config.json: ' + err.message);
     }
 
     // Set nested value using dot notation (e.g., "workflow.research")
@@ -319,7 +319,7 @@ function cmdConfigSet(cwd, keyPath, value, raw) {
   validateKnownConfigKeyPath(keyPath);
 
   if (!isValidConfigKey(keyPath)) {
-    error(`Unknown config key: "${keyPath}". Valid keys: ${[...VALID_CONFIG_KEYS].sort().join(', ')}, agent_skills.<agent-type>, features.<feature_name>`, ERROR_REASON.CONFIG_INVALID_KEY);
+    error(`Unknown config key: "${keyPath}". Valid keys: ${[...VALID_CONFIG_KEYS].sort().join(', ')}, agent_skills.<agent-type>, features.<feature_name>`);
   }
 
   // Parse value (handle booleans, numbers, and JSON arrays/objects)
@@ -377,15 +377,6 @@ function cmdConfigSet(cwd, keyPath, value, raw) {
   output(setConfigValueResult, raw, `${keyPath}=${parsedValue}`);
 }
 
-/**
- * Schema-level defaults for well-known config keys.
- * When a key is absent from config.json and no --default flag was supplied,
- * cmdConfigGet checks here before emitting "Key not found".
- */
-const SCHEMA_DEFAULTS = {
-  'context_window': 200000,
-};
-
 function cmdConfigGet(cwd, keyPath, raw, defaultValue) {
   const configPath = path.join(planningDir(cwd), 'config.json');
   const hasDefault = defaultValue !== undefined;
@@ -402,11 +393,11 @@ function cmdConfigGet(cwd, keyPath, raw, defaultValue) {
       output(defaultValue, raw, String(defaultValue));
       return;
     } else {
-      error('No config.json found at ' + configPath, ERROR_REASON.CONFIG_NO_FILE);
+      error('No config.json found at ' + configPath);
     }
   } catch (err) {
     if (err.message.startsWith('No config.json')) throw err;
-    error('Failed to read config.json: ' + err.message, ERROR_REASON.CONFIG_PARSE_FAILED);
+    error('Failed to read config.json: ' + err.message);
   }
 
   // Traverse dot-notation path (e.g., "workflow.auto_advance")
@@ -415,24 +406,14 @@ function cmdConfigGet(cwd, keyPath, raw, defaultValue) {
   for (const key of keys) {
     if (current === undefined || current === null || typeof current !== 'object') {
       if (hasDefault) { output(defaultValue, raw, String(defaultValue)); return; }
-      if (Object.prototype.hasOwnProperty.call(SCHEMA_DEFAULTS, keyPath)) {
-        const def = SCHEMA_DEFAULTS[keyPath];
-        output(def, raw, String(def));
-        return;
-      }
-      error(`Key not found: ${keyPath}`, ERROR_REASON.CONFIG_KEY_NOT_FOUND);
+      error(`Key not found: ${keyPath}`);
     }
     current = current[key];
   }
 
   if (current === undefined) {
     if (hasDefault) { output(defaultValue, raw, String(defaultValue)); return; }
-    if (Object.prototype.hasOwnProperty.call(SCHEMA_DEFAULTS, keyPath)) {
-      const def = SCHEMA_DEFAULTS[keyPath];
-      output(def, raw, String(def));
-      return;
-    }
-    error(`Key not found: ${keyPath}`, ERROR_REASON.CONFIG_KEY_NOT_FOUND);
+    error(`Key not found: ${keyPath}`);
   }
 
   // Never echo plaintext for sensitive keys via config-get. Plaintext lives

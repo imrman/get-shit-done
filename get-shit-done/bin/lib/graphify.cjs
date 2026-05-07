@@ -3,7 +3,7 @@
 const fs = require('fs');
 const path = require('path');
 const childProcess = require('child_process');
-const { atomicWriteFileSync, execGit } = require('./core.cjs');
+const { atomicWriteFileSync } = require('./core.cjs');
 
 // ─── Config Gate ─────────────────────────────────────────────────────────────
 
@@ -45,17 +45,6 @@ function disabledResponse() {
  * @param {{ timeout?: number }} [options={}] - Options (timeout in ms, default 30000)
  * @returns {{ exitCode: number, stdout: string, stderr: string }}
  */
-/**
- * Frozen enum of typed reason codes for execGraphify failures (#2974).
- * Tests assert on result.reason instead of grepping stderr text.
- */
-const GRAPHIFY_REASON = Object.freeze({
-  OK: 'ok',
-  ENOENT: 'graphify_not_found',
-  TIMEOUT: 'graphify_timed_out',
-  EXIT_NONZERO: 'graphify_exit_nonzero',
-});
-
 function execGraphify(cwd, args, options = {}) {
   const timeout = options.timeout ?? 30000;
   const result = childProcess.spawnSync('graphify', args, {
@@ -68,12 +57,7 @@ function execGraphify(cwd, args, options = {}) {
 
   // ENOENT -- graphify binary not found on PATH
   if (result.error && result.error.code === 'ENOENT') {
-    return {
-      exitCode: 127,
-      stdout: '',
-      stderr: 'graphify not found on PATH',
-      reason: GRAPHIFY_REASON.ENOENT,
-    };
+    return { exitCode: 127, stdout: '', stderr: 'graphify not found on PATH' };
   }
 
   // Timeout -- subprocess killed via SIGTERM
@@ -82,17 +66,13 @@ function execGraphify(cwd, args, options = {}) {
       exitCode: 124,
       stdout: (result.stdout ?? '').toString().trim(),
       stderr: 'graphify timed out after ' + timeout + 'ms',
-      reason: GRAPHIFY_REASON.TIMEOUT,
-      timeout_ms: timeout,
     };
   }
 
-  const exitCode = result.status ?? 1;
   return {
-    exitCode,
+    exitCode: result.status ?? 1,
     stdout: (result.stdout ?? '').toString().trim(),
     stderr: (result.stderr ?? '').toString().trim(),
-    reason: exitCode === 0 ? GRAPHIFY_REASON.OK : GRAPHIFY_REASON.EXIT_NONZERO,
   };
 }
 
@@ -359,42 +339,7 @@ function graphifyQuery(cwd, term, options = {}) {
 }
 
 /**
- * Strict 4-40 hex fence for graph.built_at_commit values (#3170). Anything
- * else (dashed, prose, empty) is treated as absent so a hostile graph.json
- * cannot smuggle a `--upload-pack=…` option into a `git` argv.
- */
-const COMMIT_HASH_RE = /^[0-9a-f]{4,40}$/i;
-
-/**
- * Read git HEAD for the project at `cwd`. Returns the full commit hash on
- * success, or null when cwd is not a git repo / `git` is not on PATH.
- */
-function readGitHead(cwd) {
-  const r = execGit(cwd, ['rev-parse', 'HEAD']);
-  if (r.exitCode !== 0) return null;
-  return r.stdout.trim() || null;
-}
-
-/**
- * Count commits between `from` and `to` (exclusive..inclusive, like
- * `git rev-list --count A..B`). Returns null when either ref is unreachable
- * or the cwd is not a git repo.
- */
-function countCommitsBetween(cwd, from, to) {
-  const r = execGit(cwd, ['rev-list', '--count', `${from}..${to}`]);
-  if (r.exitCode !== 0) return null;
-  const n = parseInt(r.stdout.trim(), 10);
-  return Number.isFinite(n) ? n : null;
-}
-
-/**
  * Return status information about the knowledge graph (STAT-01, STAT-02).
- *
- * Surfaces the graphify v0.7+ commit-staleness signal as four optional
- * fields when graph.built_at_commit is present and validly formatted
- * (#3170). Tri-state on commit_stale: null means "we don't know" (pre-v0.7
- * graph, no git, or unreachable commit), distinct from false ("known
- * fresh").
  *
  * @param {string} cwd - Working directory
  * @returns {object}
@@ -417,17 +362,6 @@ function graphifyStatus(cwd) {
   const STALE_MS = 24 * 60 * 60 * 1000; // 24 hours
   const age = Date.now() - stat.mtimeMs;
 
-  // Commit-staleness signal (#3170). Validate before passing to git.
-  const rawBuilt = (graph.built_at_commit || '').toString().trim();
-  const builtAt = COMMIT_HASH_RE.test(rawBuilt) ? rawBuilt : null;
-  const head = readGitHead(cwd);
-  let commitsBehind = null;
-  let commitStale = null;
-  if (builtAt && head) {
-    commitsBehind = countCommitsBetween(cwd, builtAt, head);
-    if (commitsBehind !== null) commitStale = commitsBehind > 0;
-  }
-
   return {
     exists: true,
     last_build: stat.mtime.toISOString(),
@@ -436,10 +370,6 @@ function graphifyStatus(cwd) {
     hyperedge_count: (graph.hyperedges || []).length,
     stale: age > STALE_MS,
     age_hours: Math.round(age / (60 * 60 * 1000)),
-    built_at_commit: builtAt ? builtAt.slice(0, 7) : null,
-    current_commit: head ? head.slice(0, 7) : null,
-    commits_behind: commitsBehind,
-    commit_stale: commitStale,
   };
 }
 
@@ -574,7 +504,6 @@ module.exports = {
   disabledResponse,
   // Subprocess
   execGraphify,
-  GRAPHIFY_REASON,
   // Presence and version
   checkGraphifyInstalled,
   checkGraphifyVersion,

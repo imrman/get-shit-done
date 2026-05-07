@@ -14,9 +14,6 @@ commands.html
 # Build artifacts (committed to npm, not git)
 hooks/dist/
 
-# Atomic-write staging dir used by scripts/build-hooks.js (see comment there)
-hooks/.dist-staging/
-
 # Coverage artifacts
 coverage/
 
@@ -69,4 +66,3 @@ vendor/
 .cache/
 tmp/
 .worktrees
-.envrc

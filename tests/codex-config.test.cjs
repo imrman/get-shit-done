@@ -1,8 +1,3 @@
-// allow-test-rule: pending-migration-to-typed-ir [#2974]
-// Tracked in #2974 for migration to typed-IR assertions per CONTRIBUTING.md
-// "Prohibited: Raw Text Matching on Test Outputs". Per-file review may
-// reclassify some entries as source-text-is-the-product during migration.
-
 /**
  * GSD Tools Tests - codex-config.cjs
  *
@@ -42,6 +37,7 @@ const {
   getCodexSkillAdapterHeader,
   convertClaudeAgentToCodexAgent,
   convertClaudeCommandToCodexSkill,
+  buildHookCommand,
   generateCodexAgentToml,
   generateCodexConfigBlock,
   stripGsdFromCodexConfig,
@@ -51,7 +47,6 @@ const {
   GSD_CODEX_MARKER,
   CODEX_AGENT_SANDBOX,
   parseTomlToObject,
-  resolveNodeRunner,
 } = require('../bin/install.js');
 
 function runCodexInstall(codexHome, cwd = path.join(__dirname, '..')) {
@@ -1435,23 +1430,41 @@ describe('Codex install hook configuration (e2e)', () => {
     assert.ok(parsed.hooks && Array.isArray(parsed.hooks.SessionStart), 'writes [[hooks.SessionStart]] AoT');
     assert.ok(Array.isArray(parsed.hooks.SessionStart[0].hooks), 'writes [[hooks.SessionStart.hooks]] sub-table');
     assert.strictEqual(parsed.hooks.SessionStart[0].hooks[0].type, 'command', 'handler type is "command"');
-    // #3017/#3181: handler command uses the same stable Node runner
-    // selected by install.js so Homebrew Cellar exec paths normalize to
-    // upgrade-safe symlinks before being written into config.toml.
-    const expectedRunner = resolveNodeRunner();
-    assert.ok(expectedRunner, 'resolveNodeRunner returns a usable runner in this test env');
-    const expectedHookPath = path.join(codexHome, 'hooks', 'gsd-check-update.js').replace(/\\/g, '/');
-    const expectedCommand = expectedRunner + ' "' + expectedHookPath + '"';
     assert.strictEqual(
       parsed.hooks.SessionStart[0].hooks[0].command,
-      expectedCommand,
-      'handler command must use absolute node runner pointing at gsd-check-update.js (#3017)'
+      buildHookCommand(codexHome, 'gsd-check-update.js'),
+      'handler command must be the exact inert shell-quoted path to gsd-check-update.js'
     );
     assert.ok(!Array.isArray(parsed.hooks), 'no flat [[hooks]] AoT emitted');
     assert.strictEqual(countMatches(content, /^codex_hooks = true$/gm), 1, 'writes one codex_hooks key');
     assert.strictEqual(countMatches(content, /gsd-check-update\.js/g), 1, 'writes one GSD update hook');
     assertNoDraftRootKeys(content);
     assertUsesOnlyEol(content, '\n');
+  });
+
+  test('Codex install shell-quotes hook command paths in config.toml', () => {
+    codexHome = path.join(tmpDir, 'codex-home-$(touch pwn)-`uname`');
+    fs.mkdirSync(codexHome, { recursive: true });
+
+    runCodexInstall(codexHome);
+
+    const content = readCodexConfig(codexHome);
+    const parsed = parseTomlToObject(content);
+    const expectedCommand = buildHookCommand(codexHome, 'gsd-check-update.js');
+
+    assert.strictEqual(
+      parsed.hooks.SessionStart[0].hooks[0].command,
+      expectedCommand,
+      'config.toml must emit the same inert shell-quoted command used by buildHookCommand'
+    );
+    assert.ok(
+      content.includes(`command = ${JSON.stringify(expectedCommand)}`),
+      'config.toml must TOML-escape the shell-quoted command string'
+    );
+    assert.ok(
+      !content.includes(`command = "node ${codexHome.replace(/\\/g, '/')}/hooks/gsd-check-update.js"`),
+      'config.toml must not emit the hook path as a double-quoted shell argument'
+    );
   });
 
   test('config_file paths are absolute using CODEX_HOME', () => {

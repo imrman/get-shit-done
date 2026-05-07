@@ -6,7 +6,7 @@ allowed-tools:
   - Read
   - Bash
   - Write
-  - Agent
+  - Task
   - AskUserQuestion
 ---
 <runtime_note>
@@ -41,6 +41,6 @@ Initialize a new project through unified flow: questioning → research (optiona
 </execution_context>
 
 <process>
-Execute end-to-end.
+Execute the new-project workflow from @~/.claude/get-shit-done/workflows/new-project.md end-to-end.
 Preserve all workflow gates (validation, approvals, commits, routing).
 </process>

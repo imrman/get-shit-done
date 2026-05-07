@@ -9,6 +9,7 @@ allowed-tools:
   - Glob
   - Grep
   - AskUserQuestion
+  - Task
   - Agent
 ---
 <objective>
@@ -40,6 +41,6 @@ Project context, phase list, and state are resolved inside the workflow using in
 </context>
 
 <process>
-Execute end-to-end.
+Execute the autonomous workflow from @~/.claude/get-shit-done/workflows/autonomous.md end-to-end.
 Preserve all workflow gates (phase discovery, per-phase execution, blocker handling, progress display).
 </process>

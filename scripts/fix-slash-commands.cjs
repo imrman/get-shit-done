@@ -18,22 +18,8 @@ const SEARCH_DIRS = [
   path.join(__dirname, '..', 'get-shit-done', 'templates'),
   path.join(__dirname, '..', 'get-shit-done', 'contexts'),
   path.join(__dirname, '..', 'commands', 'gsd'),
-  path.join(__dirname, '..', 'agents'),
-  path.join(__dirname, '..', 'sdk', 'src'),
 ];
-
-const TOP_LEVEL_FILES = [
-  path.join(__dirname, '..', '.clinerules'),
-];
-
-const SKIP_DIRS = new Set(['node_modules', 'dist', '.turbo']);
-const EXTENSIONS = new Set(['.md', '.cjs', '.js', '.ts', '.tsx']);
-
-// Test files contain intentional fixture strings (e.g. inputs the sanitizer
-// is expected to strip). Rewriting them changes test semantics.
-function isTestFile(name) {
-  return /\.test\.(c?js|tsx?)$/.test(name);
-}
+const EXTENSIONS = new Set(['.md', '.cjs', '.js']);
 
 function buildPattern(cmdNames) {
   // Empty input would compile `/gsd:()(?=[^a-zA-Z0-9_-]|$)/g`, which the regex
@@ -63,19 +49,6 @@ function readCmdNames() {
     .map(f => f.replace(/\.md$/, ''));
 }
 
-function processFile(file, cmdNames) {
-  const pattern = buildPattern(cmdNames);
-  if (!pattern) return;
-  let src;
-  try { src = fs.readFileSync(file, 'utf-8'); } catch { return; }
-  const replaced = transformContent(src, cmdNames);
-  if (replaced !== src) {
-    fs.writeFileSync(file, replaced, 'utf-8');
-    const count = (src.match(pattern) || []).length;
-    console.log(`  ${count} replacements: ${path.relative(path.join(__dirname, '..'), file)}`);
-  }
-}
-
 function processDir(dir, cmdNames) {
   const pattern = buildPattern(cmdNames);
   if (!pattern) return;
@@ -84,10 +57,15 @@ function processDir(dir, cmdNames) {
   for (const e of entries) {
     const full = path.join(dir, e.name);
     if (e.isDirectory()) {
-      if (SKIP_DIRS.has(e.name)) continue;
       processDir(full, cmdNames);
-    } else if (EXTENSIONS.has(path.extname(e.name)) && !isTestFile(e.name)) {
-      processFile(full, cmdNames);
+    } else if (EXTENSIONS.has(path.extname(e.name))) {
+      const src = fs.readFileSync(full, 'utf-8');
+      const replaced = transformContent(src, cmdNames);
+      if (replaced !== src) {
+        fs.writeFileSync(full, replaced, 'utf-8');
+        const count = (src.match(pattern) || []).length;
+        console.log(`  ${count} replacements: ${path.relative(path.join(__dirname, '..'), full)}`);
+      }
     }
   }
 }
@@ -97,10 +75,7 @@ if (require.main === module) {
   for (const dir of SEARCH_DIRS) {
     processDir(dir, cmdNames);
   }
-  for (const file of TOP_LEVEL_FILES) {
-    processFile(file, cmdNames);
-  }
   console.log('Done.');
 }
 
-module.exports = { transformContent, buildPattern, SKIP_DIRS };
+module.exports = { transformContent, buildPattern };

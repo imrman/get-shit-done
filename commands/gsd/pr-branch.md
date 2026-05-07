@@ -21,5 +21,5 @@ changes that are irrelevant to code review.
 </execution_context>
 
 <process>
-Execute end-to-end.
+Execute the pr-branch workflow from @~/.claude/get-shit-done/workflows/pr-branch.md end-to-end.
 </process>

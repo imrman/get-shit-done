@@ -30,7 +30,6 @@ Does not require `/gsd-new-project` — auto-creates `.planning/sketches/` if ne
 
 <execution_context>
 @~/.claude/get-shit-done/workflows/sketch.md
-@~/.claude/get-shit-done/workflows/sketch-wrap-up.md
 @~/.claude/get-shit-done/references/ui-brand.md
 @~/.claude/get-shit-done/references/sketch-theme-system.md
 @~/.claude/get-shit-done/references/sketch-interactivity.md
@@ -51,9 +50,6 @@ Design idea: $ARGUMENTS
 </context>
 
 <process>
-Parse the first token of $ARGUMENTS:
-- If it is `--wrap-up`: strip the flag, execute the sketch-wrap-up workflow end-to-end.
-- Otherwise: execute the sketch workflow end-to-end.
-
+Execute the sketch workflow from @~/.claude/get-shit-done/workflows/sketch.md end-to-end.
 Preserve all workflow gates (intake, decomposition, target stack research, variant evaluation, MANIFEST updates, commit patterns).
 </process>

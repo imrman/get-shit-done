@@ -140,7 +140,7 @@ Present complete project status to user:
     Resume with: Task tool (resume parameter with agent ID)
 
 [If pending todos exist:]
-📋 [N] pending todos — /gsd-capture --list to review
+📋 [N] pending todos — /gsd-check-todos to review
 
 [If blockers exist:]
 ⚠️  Carried concerns:
@@ -225,11 +225,9 @@ Wait for user selection.
 </step>
 
 <step name="route_to_workflow">
-Based on user selection, route to appropriate workflow.
+Based on user selection, route to appropriate workflow:
 
-Resume-specific exception: do **not** emit `/clear then:` here. Resume is already a session-entry flow, so the next command should be shown directly.
-
-- **Execute plan** → Show direct next command:
+- **Execute plan** → Show command for user to run after clearing:
   ```
   ---
 
@@ -237,11 +235,13 @@ Resume-specific exception: do **not** emit `/clear then:` here. Resume is alread
 
   **{phase}-{plan}: [Plan Name]** — [objective from PLAN.md]
 
+  `/clear` then:
+
   `/gsd-execute-phase {phase} ${GSD_WS}`
 
   ---
   ```
-- **Plan phase** → Show direct next command:
+- **Plan phase** → Show command for user to run after clearing:
   ```
   ---
 
@@ -249,13 +249,15 @@ Resume-specific exception: do **not** emit `/clear then:` here. Resume is alread
 
   **Phase [N]: [Name]** — [Goal from ROADMAP.md]
 
+  `/clear` then:
+
   `/gsd-plan-phase [phase-number] ${GSD_WS}`
 
   ---
 
   **Also available:**
   - `/gsd-discuss-phase [N] ${GSD_WS}` — gather context first
-  - `/gsd-plan-phase --research-phase [N] ${GSD_WS}` — investigate unknowns
+  - `/gsd-research-phase [N] ${GSD_WS}` — investigate unknowns
 
   ---
   ```

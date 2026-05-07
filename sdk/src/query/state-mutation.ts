@@ -321,7 +321,7 @@ export async function readModifyWriteStateMdFull(
  *
  * @param args - args[0]: field name, args[1]: new value
  * @param projectDir - Project root directory
- * @returns QueryResult with { updated: true/false }
+ * @returns QueryResult with { updated: true/false, field, value }
  */
 export const stateUpdate: QueryHandler = async (args, projectDir, workstream) => {
   const field = args[0];
@@ -341,7 +341,7 @@ export const stateUpdate: QueryHandler = async (args, projectDir, workstream) =>
     return content;
   }, workstream);
 
-  return { data: { updated } };
+  return { data: { updated, field, value: updated ? value : undefined } };
 };
 
 /**
@@ -1128,7 +1128,7 @@ export const statePlannedPhase: QueryHandler = async (args, projectDir, workstre
  * Query handler for `state.milestone-switch` — resets STATE.md for a new
  * milestone cycle (bug #2630 regression guard).
  *
- * The `/gsd-new-milestone` workflow only rewrote STATE.md's body (Current
+ * The `/gsd:new-milestone` workflow only rewrote STATE.md's body (Current
  * Position section). The YAML frontmatter (`milestone`, `milestone_name`,
  * `status`, `progress.*`) was never touched on a mid-flight switch, so queries
  * that read frontmatter (`state.json`, `getMilestoneInfo`, every handler that
@@ -1151,7 +1151,7 @@ export const statePlannedPhase: QueryHandler = async (args, projectDir, workstre
  *
  * Sibling CJS parity: `cmdInitNewMilestone` in `init.cjs` is read-only (like
  * the TS `initNewMilestone`). The workflow-level fix is to call
- * `state.milestone-switch` from `/gsd-new-milestone` Step 5 in place of the
+ * `state.milestone-switch` from `/gsd:new-milestone` Step 5 in place of the
  * manual body rewrite.
  */
 export const stateMilestoneSwitch: QueryHandler = async (args, projectDir, workstream) => {
@@ -1250,15 +1250,9 @@ function parseNamedArgs(
   const result: Record<string, string | boolean | null> = {};
   for (const flag of valueFlags) {
     const idx = args.indexOf(`--${flag}`);
-    if (idx === -1) {
-      result[flag] = null;
-      continue;
-    }
-    const value = args[idx + 1];
-    if (value === undefined || value.startsWith('--')) {
-      throw new GSDError(`missing value for --${flag}`, ErrorClassification.Validation);
-    }
-    result[flag] = value;
+    result[flag] = idx !== -1 && args[idx + 1] !== undefined && !args[idx + 1].startsWith('--')
+      ? args[idx + 1]
+      : null;
   }
   for (const flag of booleanFlags) {
     result[flag] = args.includes(`--${flag}`);

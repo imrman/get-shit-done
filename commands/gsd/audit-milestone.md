@@ -7,7 +7,7 @@ allowed-tools:
   - Glob
   - Grep
   - Bash
-  - Agent
+  - Task
   - Write
 ---
 <objective>
@@ -31,6 +31,6 @@ Glob: .planning/phases/*/*-VERIFICATION.md
 </context>
 
 <process>
-Execute end-to-end.
+Execute the audit-milestone workflow from @~/.claude/get-shit-done/workflows/audit-milestone.md end-to-end.
 Preserve all workflow gates (scope determination, verification reading, integration check, requirements coverage, routing).
 </process>

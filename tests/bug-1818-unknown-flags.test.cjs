@@ -1,35 +1,19 @@
 /**
- * Regression test for bug #1818, updated for #3019.
+ * Regression test for bug #1818
  *
- * Original #1818 invariant: gsd-tools must NOT silently ignore --help/-h
- * and proceed with a destructive command — that turned AI-agent
- * hallucinations into accidental data loss (e.g. `phases clear --help`
- * deleting phase dirs because the flag was dropped).
- *
- * #3019 update: the same destructive-protection invariant still holds,
- * but the response shape changed. Previously --help → non-zero error
- * exit. Now --help → render top-level usage and exit 0 WITHOUT running
- * the command. Both shapes satisfy the original invariant ("the
- * destructive command did not execute"); the new shape also restores
- * subcommand discoverability for `gsd-sdk query <subcommand> --help`.
- *
- * The tests therefore assert two things:
- *   1. The destructive command did NOT run (anti-hallucination invariant).
- *   2. The output contains the top-level usage (#3019 discoverability).
- *
- * --version remains rejected — it's never a valid gsd-tools flag and has
- * no discovery use-case.
+ * gsd-tools must reject unknown/invalid flags (--help, -h, etc.) with a
+ * non-zero exit and an error message instead of silently ignoring them and
+ * proceeding with the command — which can cause destructive operations to run
+ * when an AI agent hallucinates a flag like --help.
  */
 
 'use strict';
 
 const { describe, test, beforeEach, afterEach } = require('node:test');
 const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const path = require('node:path');
-const { runGsdTools, createTempProject, cleanup, isUsageOutput } = require('./helpers.cjs');
+const { runGsdTools, createTempProject, cleanup } = require('./helpers.cjs');
 
-describe('unknown flag guard (bug #1818, updated for #3019)', () => {
+describe('unknown flag guard (bug #1818)', () => {
   let tmpDir;
 
   beforeEach(() => {
@@ -40,68 +24,51 @@ describe('unknown flag guard (bug #1818, updated for #3019)', () => {
     cleanup(tmpDir);
   });
 
-  // ── --help renders usage and does NOT run the destructive command ────────
+  // ── --help flag ────────────────────────────────────────────────────────────
 
-  test('phases clear --help renders usage and does NOT clear phase dirs', () => {
-    // Create a sentinel phase dir so we can assert it survives.
-    const phaseDir = path.join(tmpDir, '.planning', 'phases', 'phase-99');
-    fs.mkdirSync(phaseDir, { recursive: true });
-    fs.writeFileSync(path.join(phaseDir, 'PLAN.md'), 'sentinel');
-
+  test('phases clear --help is rejected with non-zero exit', () => {
     const result = runGsdTools(['phases', 'clear', '--help'], tmpDir);
-    assert.strictEqual(result.success, true, 'help renders, no error exit');
-    assert.ok(isUsageOutput(result.output), `expected top-level usage, got: ${result.output}`);
-    // Anti-hallucination invariant: the destructive command did NOT run.
-    assert.ok(fs.existsSync(phaseDir), 'phase dir must survive — clear must not have executed');
-    assert.ok(fs.existsSync(path.join(phaseDir, 'PLAN.md')));
+    assert.strictEqual(result.success, false, 'should fail, not run destructive clear');
+    assert.match(result.error, /--help/);
   });
 
-  test('generate-slug hello --help renders usage and does NOT emit a slug', () => {
+  test('generate-slug hello --help is rejected', () => {
+    // Non-destructive baseline: generate-slug hello succeeds without --help
     const ok = runGsdTools(['generate-slug', 'hello'], tmpDir);
-    assert.strictEqual(ok.success, true, 'control: generate-slug works without --help');
-    // The control output is just the slug; the help output is the usage.
-    const slugOut = ok.output;
-    assert.ok(slugOut && !isUsageOutput(slugOut), `control should not be usage: ${slugOut}`);
+    assert.strictEqual(ok.success, true, 'control: generate-slug without --help must succeed');
 
     const result = runGsdTools(['generate-slug', 'hello', '--help'], tmpDir);
-    assert.strictEqual(result.success, true);
-    assert.ok(isUsageOutput(result.output), 'help renders top-level usage');
-    assert.notEqual(result.output, slugOut, 'help output must differ from the slug — generate-slug must not have run');
+    assert.strictEqual(result.success, false);
+    assert.match(result.error, /--help/);
   });
 
-  test('phase complete --help renders usage and does NOT mark a phase complete', () => {
+  test('phase complete --help is rejected', () => {
     const result = runGsdTools(['phase', 'complete', '--help'], tmpDir);
-    assert.strictEqual(result.success, true);
-    assert.ok(isUsageOutput(result.output));
-    // success:true + isUsageOutput is sufficient: if the destructive path
-    // had executed it would have emitted a phase-resolution error to stderr
-    // (success:false), not the usage to stdout (success:true).
+    assert.strictEqual(result.success, false);
+    assert.match(result.error, /--help/);
   });
 
-  test('state load --help renders usage', () => {
+  test('state load --help is rejected', () => {
     const result = runGsdTools(['state', 'load', '--help'], tmpDir);
-    assert.strictEqual(result.success, true);
-    assert.ok(isUsageOutput(result.output));
+    assert.strictEqual(result.success, false);
+    assert.match(result.error, /--help/);
   });
 
-  // ── -h shorthand: same shape ─────────────────────────────────────────────
+  // ── -h shorthand ──────────────────────────────────────────────────────────
 
-  test('phases clear -h renders usage and does NOT clear phase dirs', () => {
-    const phaseDir = path.join(tmpDir, '.planning', 'phases', 'phase-42');
-    fs.mkdirSync(phaseDir, { recursive: true });
+  test('phases clear -h is rejected', () => {
     const result = runGsdTools(['phases', 'clear', '-h'], tmpDir);
-    assert.strictEqual(result.success, true);
-    assert.ok(isUsageOutput(result.output));
-    assert.ok(fs.existsSync(phaseDir), 'phase dir must survive');
+    assert.strictEqual(result.success, false);
+    assert.match(result.error, /-h/);
   });
 
-  test('generate-slug hello -h renders usage', () => {
+  test('generate-slug hello -h is rejected', () => {
     const result = runGsdTools(['generate-slug', 'hello', '-h'], tmpDir);
-    assert.strictEqual(result.success, true);
-    assert.ok(isUsageOutput(result.output));
+    assert.strictEqual(result.success, false);
+    assert.match(result.error, /-h/);
   });
 
-  // ── --version is still rejected — no discovery use-case ──────────────────
+  // ── other common hallucinated flags ───────────────────────────────────────
 
   test('generate-slug hello --version is rejected', () => {
     const result = runGsdTools(['generate-slug', 'hello', '--version'], tmpDir);
@@ -109,11 +76,9 @@ describe('unknown flag guard (bug #1818, updated for #3019)', () => {
     assert.match(result.error, /--version/);
   });
 
-  // ── current-timestamp --help: same as the others ─────────────────────────
-
-  test('current-timestamp --help renders usage', () => {
+  test('current-timestamp --help is rejected', () => {
     const result = runGsdTools(['current-timestamp', '--help'], tmpDir);
-    assert.strictEqual(result.success, true);
-    assert.ok(isUsageOutput(result.output));
+    assert.strictEqual(result.success, false);
+    assert.match(result.error, /--help/);
   });
 });

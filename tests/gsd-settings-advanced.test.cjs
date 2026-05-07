@@ -1,10 +1,5 @@
 'use strict';
 
-// allow-test-rule: pending-migration-to-typed-ir [#2974]
-// Tracked in #2974 for migration to typed-IR assertions per CONTRIBUTING.md
-// "Prohibited: Raw Text Matching on Test Outputs". Per-file review may
-// reclassify some entries as source-text-is-the-product during migration.
-
 /**
  * Tests for `/gsd-settings-advanced` — power-user configuration command (#2528).
  *
@@ -206,15 +201,11 @@ describe('gsd-settings-advanced — VALID_CONFIG_KEYS coverage', () => {
 // ─── /gsd-settings mentions /gsd-settings-advanced ────────────────────────────
 
 describe('/gsd-settings advertises /gsd-settings-advanced', () => {
-  test('settings workflow mentions canonical /gsd-config --advanced', () => {
+  test('settings workflow confirmation mentions gsd-settings-advanced', () => {
     const text = fs.readFileSync(SETTINGS_WORKFLOW_PATH, 'utf-8');
     assert.ok(
-      text.includes('gsd-config --advanced'),
-      'get-shit-done/workflows/settings.md must mention /gsd-config --advanced'
-    );
-    assert.ok(
-      !text.includes('gsd-settings-advanced') && !text.includes('gsd:settings-advanced'),
-      'get-shit-done/workflows/settings.md must not mention legacy /gsd-settings-advanced variants'
+      text.includes('gsd-settings-advanced') || text.includes('gsd:settings-advanced'),
+      'get-shit-done/workflows/settings.md must mention /gsd-settings-advanced or /gsd:settings-advanced'
     );
   });
 });

@@ -1,9 +1,5 @@
 'use strict';
 
-// allow-test-rule: source-text-is-the-product
-// Reads .md/.json/.yml product files whose deployed text IS what the
-// runtime loads — testing text content tests the deployed contract.
-
 /**
  * Tests for canonical artifact registry and gsd-health W019 lint (#2448).
  */
@@ -45,10 +41,6 @@ describe('artifacts.cjs — isCanonicalPlanningFile', () => {
   test('returns true for version-stamped milestone audit file', () => {
     assert.ok(isCanonicalPlanningFile('v1.0-MILESTONE-AUDIT.md'));
     assert.ok(isCanonicalPlanningFile('v2.3.1-MILESTONE-AUDIT.md'));
-  });
-
-  test('returns true for RETROSPECTIVE.md (produced by /gsd-complete-milestone)', () => {
-    assert.strictEqual(isCanonicalPlanningFile('RETROSPECTIVE.md'), true);
   });
 
   test('returns false for clearly non-canonical names', () => {

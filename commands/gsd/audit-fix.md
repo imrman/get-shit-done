@@ -29,5 +29,5 @@ Flags:
 </execution_context>
 
 <process>
-Execute end-to-end.
+Execute the audit-fix workflow from @~/.claude/get-shit-done/workflows/audit-fix.md end-to-end.
 </process>

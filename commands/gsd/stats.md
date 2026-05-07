@@ -14,5 +14,5 @@ Display comprehensive project statistics including phase progress, plan executio
 </execution_context>
 
 <process>
-Execute end-to-end.
+Execute the stats workflow from @~/.claude/get-shit-done/workflows/stats.md end-to-end.
 </process>

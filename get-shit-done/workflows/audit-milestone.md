@@ -67,7 +67,7 @@ With phase context collected:
 Extract `MILESTONE_REQ_IDS` from REQUIREMENTS.md traceability table — all REQ-IDs assigned to phases in this milestone.
 
 ```
-Agent(
+Task(
   prompt="Check cross-phase integration and E2E flows.
 
 Phases: {phase_dirs}
@@ -86,7 +86,7 @@ ${AGENT_SKILLS_CHECKER}",
 )
 ```
 
-> **ORCHESTRATOR RULE — CODEX RUNTIME**: After calling Agent() above, stop working on this task immediately. Do not read more files, edit code, or run tests related to this task while the subagent is active. Wait for the subagent to return its result. This prevents duplicate work, conflicting edits, and wasted context. Only resume when the subagent result is available.
+> **ORCHESTRATOR RULE — CODEX RUNTIME**: After calling Task() above, stop working on this task immediately. Do not read more files, edit code, or run tests related to this task while the subagent is active. Wait for the subagent to return its result. This prevents duplicate work, conflicting edits, and wasted context. Only resume when the subagent result is available.
 
 ## 4. Collect Results
 
@@ -274,22 +274,11 @@ Phases needing validation: run `/gsd-validate-phase {N}` for each flagged phase.
 
 ## ▶ Next Up — [${PROJECT_CODE}] ${PROJECT_TITLE}
 
-**Close the gaps inline** — gap planning happens as part of this audit's
-output (see the Unsatisfied Requirements, Cross-Phase Issues, Broken Flows,
-and Nyquist Coverage sections above). Insert one closure phase per gap (or
-per group of related gaps) using the standard phase chain:
+**Plan gap closure** — create phases to complete milestone
 
 /clear then:
 
-/gsd-phase --insert <N> "Close gap: <REQ-ID> — <description>"
-/gsd-discuss-phase <N>
-/gsd-plan-phase <N>
-/gsd-execute-phase <N>
-
-For Nyquist-coverage gaps flagged in the table above, prefer running
-`/gsd-validate-phase <N>` for each flagged phase (and `/gsd-secure-phase
-<N>` if SECURITY.md was flagged) before inserting a new closure phase —
-they may close the gap retroactively without a new phase.
+/gsd-plan-milestone-gaps
 
 ───────────────────────────────────────────────────────────────
 
@@ -327,15 +316,11 @@ All requirements met. No critical blockers. Accumulated tech debt needs review.
 
 /gsd-complete-milestone {version}
 
-**B. Plan a cleanup phase** — address the debt above before completing.
-Insert a closure phase using the standard chain:
+**B. Plan cleanup phase** — address debt before completing
 
 /clear then:
 
-/gsd-phase --insert <N> "Address tech debt: <area>"
-/gsd-discuss-phase <N>
-/gsd-plan-phase <N>
-/gsd-execute-phase <N>
+/gsd-plan-milestone-gaps
 
 ───────────────────────────────────────────────────────────────
 </offer_next>

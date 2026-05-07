@@ -1,8 +1,3 @@
-// allow-test-rule: pending-migration-to-typed-ir [#2974]
-// Tracked in #2974 for migration to typed-IR assertions per CONTRIBUTING.md
-// "Prohibited: Raw Text Matching on Test Outputs". Per-file review may
-// reclassify some entries as source-text-is-the-product during migration.
-
 process.env.GSD_TEST_MODE = '1';
 
 const { test, describe, beforeEach, afterEach } = require('node:test');
@@ -182,7 +177,6 @@ describe('Trae local install/uninstall', () => {
       settingsPath: null,
       settings: null,
       statuslineCommand: null,
-      updateBannerCommand: null,
       runtime: 'trae',
       configDir: fs.realpathSync(targetDir),
     });

@@ -28,7 +28,6 @@ export const VALID_CONFIG_KEYS: ReadonlySet<string> = new Set([
   'workflow.skip_discuss',
   'workflow.auto_prune_state',
   'workflow.use_worktrees',
-  'workflow.worktree_skip_hooks',
   'workflow.code_review',
   'workflow.code_review_depth',
   'workflow.code_review_command',
@@ -71,16 +70,6 @@ export const VALID_CONFIG_KEYS: ReadonlySet<string> = new Set([
   'claude_md_assembly.mode',
   // #2517 — runtime-aware model profiles
   'runtime',
-  // #3162 — documented top-level key: controls model ID resolution for non-Claude runtimes
-  'resolve_model_ids',
-]);
-
-/**
- * Internal runtime-state keys accepted by config-set workflows but not exposed
- * as user-facing config options.
- */
-export const RUNTIME_STATE_KEYS: ReadonlySet<string> = new Set([
-  'workflow._auto_chain_active',
 ]);
 
 /**
@@ -121,23 +110,10 @@ export const DYNAMIC_KEY_PATTERNS: readonly DynamicKeyPattern[] = [
     description: 'model_profile_overrides.<runtime>.<opus|sonnet|haiku>',
     test: (k) => /^model_profile_overrides\.[a-zA-Z0-9_-]+\.(opus|sonnet|haiku)$/.test(k),
   },
-  // #3023 — per-phase-type model map: models.<phase_type> = <tier>
-  {
-    source: '^models\\.(planning|discuss|research|execution|verification|completion)$',
-    description: 'models.<planning|discuss|research|execution|verification|completion>',
-    test: (k) => /^models\.(planning|discuss|research|execution|verification|completion)$/.test(k),
-  },
-  // #3024 — dynamic routing with failure-tier escalation
-  {
-    source: '^dynamic_routing\\.(enabled|escalate_on_failure|max_escalations|tier_models\\.(light|standard|heavy))$',
-    description: 'dynamic_routing.<enabled|escalate_on_failure|max_escalations|tier_models.<light|standard|heavy>>',
-    test: (k) => /^dynamic_routing\.(enabled|escalate_on_failure|max_escalations|tier_models\.(light|standard|heavy))$/.test(k),
-  },
 ];
 
-/** Returns true if keyPath is a valid config key (exact, runtime-state, or dynamic pattern). */
+/** Returns true if keyPath is a valid config key (exact or dynamic pattern). */
 export function isValidConfigKeyPath(keyPath: string): boolean {
   if (VALID_CONFIG_KEYS.has(keyPath)) return true;
-  if (RUNTIME_STATE_KEYS.has(keyPath)) return true;
   return DYNAMIC_KEY_PATTERNS.some((p) => p.test(keyPath));
 }

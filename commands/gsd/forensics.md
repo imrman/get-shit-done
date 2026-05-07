@@ -36,7 +36,7 @@ Output: Forensic report saved to `.planning/forensics/`, presented inline, with 
 </context>
 
 <process>
-Execute end-to-end.
+Read and execute the forensics workflow from @~/.claude/get-shit-done/workflows/forensics.md end-to-end.
 </process>
 
 <success_criteria>

@@ -9,7 +9,7 @@ allowed-tools:
   - Bash
   - Glob
   - Grep
-  - Agent
+  - Task
   - AskUserQuestion
 ---
 <objective>
@@ -43,6 +43,6 @@ Arguments: $ARGUMENTS
 </context>
 
 <process>
-Execute end-to-end.
+Execute the docs-update workflow from @~/.claude/get-shit-done/workflows/docs-update.md end-to-end.
 Preserve all workflow gates (preservation_check, flag handling, wave execution, monorepo dispatch, commit, reporting).
 </process>

@@ -9,7 +9,7 @@ allowed-tools:
   - Bash
   - Glob
   - Grep
-  - Agent
+  - Task
   - AskUserQuestion
 ---
 <objective>
@@ -30,6 +30,6 @@ Phase: $ARGUMENTS — optional, defaults to last completed phase.
 </context>
 
 <process>
-Execute end-to-end.
+Execute @~/.claude/get-shit-done/workflows/secure-phase.md.
 Preserve all workflow gates.
 </process>

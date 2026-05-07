@@ -9,7 +9,7 @@ allowed-tools:
   - Glob
   - Grep
   - Bash
-  - Agent
+  - Task
   - AskUserQuestion
 ---
 <objective>
@@ -153,7 +153,7 @@ When SUBCMD=resume and SLUG is set (already sanitized):
 
 When SUBCMD=run:
 
-Execute end-to-end.
+Execute the quick workflow from @~/.claude/get-shit-done/workflows/quick.md end-to-end.
 Preserve all workflow gates (validation, task description, planning, execution, state updates, commits).
 
 </process>

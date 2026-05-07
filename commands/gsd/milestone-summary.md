@@ -37,7 +37,7 @@ Output: MILESTONE_SUMMARY written to `.planning/reports/`, presented inline, opt
 </context>
 
 <process>
-Execute end-to-end.
+Read and execute the milestone-summary workflow from @~/.claude/get-shit-done/workflows/milestone-summary.md end-to-end.
 </process>
 
 <success_criteria>

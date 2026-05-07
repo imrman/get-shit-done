@@ -163,11 +163,4 @@ function parseFrontmatter(content) {
   return fields;
 }
 
-// #3026 CR: shared `--help` output check used by bug-1818 + bug-3019 tests.
-// Render-on-help shape is `Usage: gsd-tools …\nCommands: …` — both lines
-// must be present; structural test, not prose substring matching.
-function isUsageOutput(text) {
-  return /Usage:\s*gsd-tools/.test(text) && /Commands:/.test(text);
-}
-
-module.exports = { runGsdTools, createTempDir, createTempProject, createTempGitProject, cleanup, parseFrontmatter, isUsageOutput, TOOLS_PATH };
+module.exports = { runGsdTools, createTempDir, createTempProject, createTempGitProject, cleanup, parseFrontmatter, TOOLS_PATH };
