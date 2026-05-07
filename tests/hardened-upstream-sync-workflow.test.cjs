@@ -1,3 +1,4 @@
+// allow-test-rule: workflow-yaml-release-policy-is-the-product
 const { describe, test } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');

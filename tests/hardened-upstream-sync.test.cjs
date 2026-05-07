@@ -1,3 +1,4 @@
+// allow-test-rule: workflow-script-harness-asserts-gh-cli-and-log-contracts
 const { afterEach, describe, test } = require('node:test');
 const assert = require('node:assert/strict');
 const { execFileSync, execSync, spawnSync } = require('node:child_process');

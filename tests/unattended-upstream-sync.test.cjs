@@ -1,3 +1,4 @@
+// allow-test-rule: shell-script-integration-harness-asserts-process-log-contracts
 const { afterEach, describe, test } = require('node:test');
 const assert = require('node:assert/strict');
 const { execFileSync, spawnSync } = require('node:child_process');
