@@ -119,6 +119,16 @@ describe('prompt-injection-scan.sh', { skip: IS_WINDOWS }, () => {
     assert.equal(result.status, 0, `Exact SECURITY.md path should be allowlisted: ${result.stdout}`);
   });
 
+  test('allows base64 scanner implementation to contain detection patterns', () => {
+    const result = runScriptAtRelativePath(
+      SCRIPTS.injection,
+      'scripts/base64-scan.cjs',
+      'const patterns = [/<<SYS>>/i, /jailbreak/i];\n',
+      ['--file', 'scripts/base64-scan.cjs']
+    );
+    assert.equal(result.status, 0, `base64 scanner source should be allowlisted: ${result.stdout}`);
+  });
+
   test('does not allow nested docs/SECURITY.md to bypass scanning', () => {
     const result = runScriptAtRelativePath(
       SCRIPTS.injection,
