@@ -13,8 +13,10 @@
 // Action: Advisory warning (does not block) — logs detection for awareness
 // Severity: LOW (1–2 patterns), HIGH (3+ patterns)
 //
-// False-positive exclusion: .planning/, REVIEW.md, CHECKPOINT, security docs,
-// hook source files — these legitimately contain injection-like strings.
+// False-positive exclusion: exact .planning/ artifacts, REVIEW.md, CHECKPOINT,
+// and the known hook/security source files below — these legitimately contain
+// injection-like strings. Path names containing "security" or "injection" are
+// still scanned unless they are one of the exact trusted paths.
 
 const path = require('path');
 
@@ -47,16 +49,24 @@ const INJECTION_PATTERNS = [
 
 const ALL_PATTERNS = [...INJECTION_PATTERNS, ...SUMMARISATION_PATTERNS];
 
+function normalizePath(filePath) {
+  let p = filePath.replace(/\\/g, '/');
+  while (p.startsWith('./')) {
+    p = p.slice(2);
+  }
+  return p;
+}
+
 function isExcludedPath(filePath) {
-  const p = filePath.replace(/\\/g, '/');
+  const p = normalizePath(filePath);
+  const base = path.basename(p).toUpperCase();
   return (
-    p.includes('/.planning/') ||
-    p.includes('.planning/') ||
+    /(^|\/)\.planning(?:\/|$)/.test(p) ||
     /(?:^|\/)REVIEW\.md$/i.test(p) ||
-    /CHECKPOINT/i.test(path.basename(p)) ||
-    /[/\\](?:security|techsec|injection)[/\\.]/i.test(p) ||
-    /security\.cjs$/.test(p) ||
-    p.includes('/.claude/hooks/')
+    base === 'CHECKPOINT' ||
+    /(?:^|\/)\.(?:claude|codex)\/hooks\/gsd-(?:prompt-guard|read-injection-scanner)\.js$/.test(p) ||
+    /(?:^|\/)get-shit-done\/hooks\/gsd-(?:prompt-guard|read-injection-scanner)\.js$/.test(p) ||
+    /(?:^|\/)get-shit-done\/bin\/lib\/security\.cjs$/.test(p)
   );
 }
 

@@ -37,6 +37,7 @@ const {
   getCodexSkillAdapterHeader,
   convertClaudeAgentToCodexAgent,
   convertClaudeCommandToCodexSkill,
+  buildHookCommand,
   generateCodexAgentToml,
   generateCodexConfigBlock,
   stripGsdFromCodexConfig,
@@ -1431,14 +1432,39 @@ describe('Codex install hook configuration (e2e)', () => {
     assert.strictEqual(parsed.hooks.SessionStart[0].hooks[0].type, 'command', 'handler type is "command"');
     assert.strictEqual(
       parsed.hooks.SessionStart[0].hooks[0].command,
-      'node ' + path.join(codexHome, 'hooks', 'gsd-check-update.js').replace(/\\/g, '/'),
-      'handler command must be the exact absolute path to gsd-check-update.js'
+      buildHookCommand(codexHome, 'gsd-check-update.js'),
+      'handler command must be the exact inert shell-quoted path to gsd-check-update.js'
     );
     assert.ok(!Array.isArray(parsed.hooks), 'no flat [[hooks]] AoT emitted');
     assert.strictEqual(countMatches(content, /^codex_hooks = true$/gm), 1, 'writes one codex_hooks key');
     assert.strictEqual(countMatches(content, /gsd-check-update\.js/g), 1, 'writes one GSD update hook');
     assertNoDraftRootKeys(content);
     assertUsesOnlyEol(content, '\n');
+  });
+
+  test('Codex install shell-quotes hook command paths in config.toml', () => {
+    codexHome = path.join(tmpDir, 'codex-home-$(touch pwn)-`uname`');
+    fs.mkdirSync(codexHome, { recursive: true });
+
+    runCodexInstall(codexHome);
+
+    const content = readCodexConfig(codexHome);
+    const parsed = parseTomlToObject(content);
+    const expectedCommand = buildHookCommand(codexHome, 'gsd-check-update.js');
+
+    assert.strictEqual(
+      parsed.hooks.SessionStart[0].hooks[0].command,
+      expectedCommand,
+      'config.toml must emit the same inert shell-quoted command used by buildHookCommand'
+    );
+    assert.ok(
+      content.includes(`command = ${JSON.stringify(expectedCommand)}`),
+      'config.toml must TOML-escape the shell-quoted command string'
+    );
+    assert.ok(
+      !content.includes(`command = "node ${codexHome.replace(/\\/g, '/')}/hooks/gsd-check-update.js"`),
+      'config.toml must not emit the hook path as a double-quoted shell argument'
+    );
   });
 
   test('config_file paths are absolute using CODEX_HOME', () => {

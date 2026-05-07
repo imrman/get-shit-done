@@ -22,10 +22,15 @@
 
 'use strict';
 
+process.env.GSD_TEST_MODE = '1';
+
 const { describe, test } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
+
+const { buildHookCommand } = require('../bin/install.js');
 
 const INSTALL_SRC = path.join(__dirname, '..', 'bin', 'install.js');
 
@@ -175,5 +180,37 @@ describe('bugs #2045 #2046: .sh hook paths must be absolute and quoted', () => {
         `Found: ${block.slice(0, 150)}`
       );
     }
+  });
+});
+
+describe('hook command shell escaping', () => {
+  test('buildHookCommand single-quotes absolute paths so $(...) and backticks stay inert', () => {
+    const command = buildHookCommand(
+      "/tmp/evil $(touch /tmp/pwn) `uname` it's here",
+      'gsd-check-update.js'
+    );
+
+    assert.strictEqual(
+      command,
+      "node '/tmp/evil $(touch /tmp/pwn) `uname` it'\"'\"'s here/hooks/gsd-check-update.js'"
+    );
+    assert.ok(!command.includes('"$(touch /tmp/pwn)"'), 'must not leave command substitution inside double quotes');
+    assert.ok(!command.includes('"`uname`"'), 'must not leave backticks inside double quotes');
+  });
+
+  test('buildHookCommand preserves portable $HOME support while single-quoting the unsafe suffix', () => {
+    const command = buildHookCommand(
+      path.join(os.homedir(), ".codex-$(touch /tmp/pwn)-`uname`"),
+      'gsd-check-update.js',
+      { portableHooks: true }
+    );
+
+    assert.strictEqual(
+      command,
+      `node "$HOME"'/.codex-$(touch /tmp/pwn)-\`uname\`/hooks/gsd-check-update.js'`
+    );
+    assert.ok(command.startsWith('node "$HOME"'), 'portable hook command must still expand $HOME');
+    assert.ok(!command.includes('"$HOME/.codex-$(touch /tmp/pwn)-`uname`/hooks/gsd-check-update.js"'),
+      'portable hook command must not wrap the substituted path in double quotes');
   });
 });

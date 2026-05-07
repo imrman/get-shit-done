@@ -80,10 +80,20 @@ ALLOWLIST=(
   'SECURITY.md'
 )
 
-is_allowlisted() {
+normalize_repo_path() {
   local file="$1"
+  file="${file//\\//}"
+  while [[ "$file" == ./* ]]; do
+    file="${file#./}"
+  done
+  printf '%s\n' "$file"
+}
+
+is_allowlisted() {
+  local file
+  file="$(normalize_repo_path "$1")"
   for allowed in "${ALLOWLIST[@]}"; do
-    if [[ "$file" == *"$allowed" ]]; then
+    if [[ "$file" == "$allowed" ]]; then
       return 0
     fi
   done

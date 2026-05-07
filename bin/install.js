@@ -536,24 +536,33 @@ function computePathPrefix({ isGlobal, isOpencode, isWindowsHost: _isWindowsHost
  *   Safe for Linux/macOS global installs and WSL/Docker bind-mount scenarios.
  *   Not suitable for pure Windows (cmd.exe/PowerShell do not expand $HOME).
  */
+function shellSingleQuote(value) {
+  return `'${String(value).replace(/'/g, `'\"'\"'`)}'`;
+}
+
+function shellQuoteHookPath(hooksPath, opts) {
+  const normalized = hooksPath.replace(/\\/g, '/');
+
+  if (opts && opts.portableHooks) {
+    const home = os.homedir().replace(/\\/g, '/');
+    if (normalized.startsWith(home)) {
+      const suffix = normalized.slice(home.length);
+      return suffix ? `"$HOME"${shellSingleQuote(suffix)}` : '"$HOME"';
+    }
+  }
+
+  return shellSingleQuote(normalized);
+}
+
+function tomlBasicString(value) {
+  return JSON.stringify(value);
+}
+
 function buildHookCommand(configDir, hookName, opts) {
   if (!opts) opts = {};
   const runner = hookName.endsWith('.sh') ? 'bash' : 'node';
-
-  if (opts.portableHooks) {
-    // Replace the home directory prefix with $HOME so the path works when
-    // ~/.claude is bind-mounted into a container at a different absolute path.
-    const home = os.homedir().replace(/\\/g, '/');
-    const normalized = configDir.replace(/\\/g, '/');
-    const relative = normalized.startsWith(home)
-      ? '$HOME' + normalized.slice(home.length)
-      : normalized;
-    return `${runner} "${relative}/hooks/${hookName}"`;
-  }
-
-  // Default: absolute path with forward slashes (Windows-safe, fixes #2045/#2046).
   const hooksPath = configDir.replace(/\\/g, '/') + '/hooks/' + hookName;
-  return `${runner} "${hooksPath}"`;
+  return `${runner} ${shellQuoteHookPath(hooksPath, opts)}`;
 }
 
 /**
@@ -7614,13 +7623,12 @@ function install(isGlobal, runtime = 'claude') {
       // two-level nested AoT schema: [[hooks.SessionStart]] for the event entry
       // (holds optional matcher) and [[hooks.SessionStart.hooks]] for the handler
       // (holds type, command, statusMessage, timeout). (#2637, #2760, #2773)
-      const updateCheckScript = path.resolve(targetDir, 'hooks', 'gsd-check-update.js').replace(/\\/g, '/');
       const hookBlock = `${eol}# GSD Hooks${eol}` +
         `[[hooks.SessionStart]]${eol}` +
         `${eol}` +
         `[[hooks.SessionStart.hooks]]${eol}` +
         `type = "command"${eol}` +
-        `command = "node ${updateCheckScript}"${eol}`;
+        `command = ${tomlBasicString(buildHookCommand(targetDir, 'gsd-check-update.js'))}${eol}`;
 
       if (hasEnabledCodexHooksFeature(configContent) && !configContent.includes('gsd-check-update')) {
         configContent += hookBlock;
@@ -8890,6 +8898,7 @@ if (process.env.GSD_TEST_MODE) {
     CODEX_AGENT_SANDBOX,
     getDirName,
     getGlobalDir,
+    buildHookCommand,
     getConfigDirFromHome,
     resolveKiloConfigPath,
     configureKiloPermissions,
