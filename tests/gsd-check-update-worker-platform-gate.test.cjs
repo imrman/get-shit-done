@@ -43,6 +43,9 @@ describe('gsd-check-update-worker: Windows npm spawn platform gate', () => {
 
   test('shell option is gated to process.platform === "win32"', () => {
     const src = fs.readFileSync(WORKER_PATH, 'utf8');
+    const codeOnly = src
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/(^|[^:])\/\/[^\n]*/g, '$1');
 
     // Locks the platform gate. Allows whitespace/quote variation around
     // the comparison so trivial style fixes do not break the contract.
@@ -50,7 +53,7 @@ describe('gsd-check-update-worker: Windows npm spawn platform gate', () => {
       /shell:\s*process\.platform\s*===\s*['"]win32['"]/;
 
     assert.match(
-      src,
+      codeOnly,
       platformGate,
       [
         'shell option must be `process.platform === "win32"`.',
