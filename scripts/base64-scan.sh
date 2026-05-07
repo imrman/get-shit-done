@@ -17,7 +17,12 @@ set -euo pipefail
 export LC_ALL=C
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if command -v node >/dev/null 2>&1 && [[ -f "$SCRIPT_DIR/base64-scan.cjs" ]]; then
+  exec node "$SCRIPT_DIR/base64-scan.cjs" "$@"
+fi
+
 MIN_BLOB_LENGTH=40
+MAX_BLOB_LENGTH=8192
 
 # ─── Injection Patterns (decoded content) ────────────────────────────────────
 # Subset of patterns — if someone base64-encoded something, check for the
@@ -167,6 +172,24 @@ extract_and_check_blobs() {
 
     while IFS= read -r blob; do
       [[ -z "$blob" ]] && continue
+
+      local blob_len=${#blob}
+      if [[ $((blob_len % 4)) -ne 0 ]]; then
+        continue
+      fi
+
+      if [[ $blob_len -gt $MAX_BLOB_LENGTH ]]; then
+        continue
+      fi
+
+      # Plain alphanumeric source text often matches the broad base64
+      # character class. Only decode ambiguous unpadded blobs when the
+      # surrounding line looks like encoded data rather than prose/code words.
+      if [[ "$blob" != *"+"* && "$blob" != *"/"* && "$blob" != *"="* ]]; then
+        if ! echo "$line" | grep -iqE '(base64|encoded|payload|blob|secret|token|data|["'\''`:={}])' 2>/dev/null; then
+          continue
+        fi
+      fi
 
       # Check ignorelist
       if [[ ${#IGNORED_PATTERNS[@]} -gt 0 ]] && is_ignored "$blob"; then
