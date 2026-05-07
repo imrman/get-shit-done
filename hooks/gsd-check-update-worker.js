@@ -56,6 +56,7 @@ const MANAGED_HOOKS = [
   'gsd-read-injection-scanner.js',
   'gsd-session-state.sh',
   'gsd-statusline.js',
+  'gsd-update-banner.js',
   'gsd-validate-commit.sh',
   'gsd-workflow-guard.js',
 ];
@@ -92,6 +93,7 @@ try {
     encoding: 'utf8',
     timeout: 10000,
     windowsHide: true,
+    shell: process.platform === 'win32',
   }).trim();
 } catch (e) {}
 

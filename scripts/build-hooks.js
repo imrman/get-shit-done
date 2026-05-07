@@ -22,6 +22,7 @@ const HOOKS_TO_COPY = [
   'gsd-read-guard.js',
   'gsd-read-injection-scanner.js',
   'gsd-statusline.js',
+  'gsd-update-banner.js',
   'gsd-workflow-guard.js',
   // Community hooks (bash, opt-in via .planning/config.json hooks.community)
   'gsd-session-state.sh',
@@ -82,6 +83,12 @@ function build() {
     if (hook.endsWith('.sh')) {
       try { fs.chmodSync(dest, 0o755); } catch (e) { /* Windows */ }
     }
+  }
+
+  const libSrc = path.join(HOOKS_DIR, 'lib');
+  if (fs.existsSync(libSrc)) {
+    fs.cpSync(libSrc, path.join(DIST_DIR, 'lib'), { recursive: true });
+    console.log(`\x1b[32m✓\x1b[0m Copying hook libraries...`);
   }
 
   if (hasErrors) {

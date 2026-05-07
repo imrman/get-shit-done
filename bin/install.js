@@ -7399,6 +7399,10 @@ function install(isGlobal, runtime = 'claude') {
       const configDirReplacement = getConfigDirFromHome(runtime, isGlobal);
       for (const entry of hookEntries) {
         const srcFile = path.join(hooksSrc, entry);
+        if (fs.statSync(srcFile).isDirectory()) {
+          fs.cpSync(srcFile, path.join(hooksDest, entry), { recursive: true });
+          continue;
+        }
         if (fs.statSync(srcFile).isFile()) {
           const destFile = path.join(hooksDest, entry);
           // Template .js files to replace '.claude' with runtime-specific config dir
@@ -7559,6 +7563,10 @@ function install(isGlobal, runtime = 'claude') {
       const configDirReplacement = getConfigDirFromHome(runtime, isGlobal);
       for (const entry of fs.readdirSync(codexHooksSrc)) {
         const srcFile = path.join(codexHooksSrc, entry);
+        if (fs.statSync(srcFile).isDirectory()) {
+          fs.cpSync(srcFile, path.join(codexHooksDest, entry), { recursive: true });
+          continue;
+        }
         if (!fs.statSync(srcFile).isFile()) continue;
         const destFile = path.join(codexHooksDest, entry);
         if (entry.endsWith('.js')) {
