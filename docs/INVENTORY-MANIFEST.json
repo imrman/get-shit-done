@@ -265,6 +265,7 @@
       "intel.cjs",
       "learnings.cjs",
       "milestone.cjs",
+      "model-catalog.cjs",
       "model-profiles.cjs",
       "phase-command-router.cjs",
       "phase.cjs",

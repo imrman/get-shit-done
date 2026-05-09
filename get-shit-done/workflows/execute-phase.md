@@ -1,11 +1,9 @@
 <purpose>
 Execute all plans in a phase using wave-based parallel execution. Orchestrator stays lean — delegates plan execution to subagents.
 </purpose>
-
 <core_principle>
 Orchestrator coordinates, not executes. Each subagent loads the full execute-plan context. Orchestrator: discover plans → analyze deps → group waves → spawn agents → handle checkpoints → collect results.
 </core_principle>
-
 <runtime_compatibility>
 **Subagent spawning is runtime-specific:**
 - **Claude Code:** Uses `Task(subagent_type="gsd-executor", ...)` — blocks until complete, returns result
@@ -16,25 +14,20 @@ Orchestrator coordinates, not executes. Each subagent loads the full execute-pla
   to detect completion.
 - **Other runtimes:** If `Task`/`task` tool is unavailable, use sequential inline execution as the
   fallback. Check for tool availability at runtime rather than assuming based on runtime name.
-
 **Fallback rule:** If a spawned agent completes its work (commits visible, SUMMARY.md exists) but
 the orchestrator never receives the completion signal, treat it as successful based on spot-checks
 and continue to the next wave/plan. Never block indefinitely waiting for a signal — always verify
 via filesystem and git state.
 </runtime_compatibility>
-
 <required_reading>
 Read STATE.md before any operation to load project context.
-
 @~/.claude/get-shit-done/references/agent-contracts.md
 @~/.claude/get-shit-done/references/context-budget.md
 @~/.claude/get-shit-done/references/gates.md
 </required_reading>
-
 <available_agent_types>
 These are the valid GSD subagent types registered in .claude/agents/ (or equivalent for your runtime).
 Always use the exact name from this list — do not fall back to 'general-purpose' or other built-in types:
-
 - gsd-executor — Executes plan tasks, commits, creates SUMMARY.md
 - gsd-verifier — Verifies phase completion, checks quality gates
 - gsd-planner — Creates detailed plans from phase scope
@@ -48,44 +41,31 @@ Always use the exact name from this list — do not fall back to 'general-purpos
 - gsd-ui-checker — Reviews UI implementation quality
 - gsd-ui-auditor — Audits UI against design requirements
 </available_agent_types>
-
 <process>
-
 <step name="parse_args" priority="first">
 Parse `$ARGUMENTS` before loading any context:
-
 - First positional token → `PHASE_ARG`
 - Optional `--wave N` → `WAVE_FILTER`
 - Optional `--gaps-only` keeps its current meaning
 - Optional `--cross-ai` → `CROSS_AI_FORCE=true` (force all plans through cross-AI execution)
 - Optional `--no-cross-ai` → `CROSS_AI_DISABLED=true` (disable cross-AI for this run, overrides config and frontmatter)
-
 If `--wave` is absent, preserve the current behavior of executing all incomplete waves in the phase.
 </step>
-
 <step name="initialize" priority="first">
 Load all context in one call:
-
 ```bash
 INIT=$(gsd-sdk query init.execute-phase "${PHASE_ARG}")
 if [[ "$INIT" == @file:* ]]; then INIT=$(cat "${INIT#@file:}"); fi
 AGENT_SKILLS=$(gsd-sdk query agent-skills gsd-executor)
 ```
-
 Parse JSON for: `executor_model`, `verifier_model`, `commit_docs`, `parallelization`, `branching_strategy`, `branch_name`, `phase_found`, `phase_dir`, `phase_number`, `phase_name`, `phase_slug`, `plans`, `incomplete_plans`, `plan_count`, `incomplete_count`, `state_exists`, `roadmap_exists`, `phase_req_ids`, `response_language`.
-
 **Model resolution:** If `executor_model` is `"inherit"`, omit the `model=` parameter from all `Task()` calls — do NOT pass `model="inherit"` to Task. Omitting the `model=` parameter causes Claude Code to inherit the current orchestrator model automatically. Only set `model=` when `executor_model` is an explicit model name (e.g., `"claude-sonnet-4-6"`, `"claude-opus-4-7"`).
-
 **If `response_language` is set:** Include `response_language: {value}` in all spawned subagent prompts so any user-facing output stays in the configured language.
-
 Read worktree config:
-
 ```bash
 USE_WORKTREES=$(gsd-sdk query config-get workflow.use_worktrees 2>/dev/null || echo "true")
 ```
-
 If the project uses git submodules, worktree isolation is unsafe **only when a plan touches a submodule path** — the executor commit protocol cannot correctly handle submodule commits inside isolated worktrees. The previous behavior unconditionally disabled worktree isolation whenever `.gitmodules` existed, which penalised every plan in a submodule project even when the plan was nowhere near a submodule. Compute submodule paths once and intersect them per-plan with the plan's declared `files_modified` frontmatter.
-
 ```bash
 # Parse submodule paths from .gitmodules once (empty if no .gitmodules).
 # SUBMODULE_PATHS is a newline-separated list of repo-relative paths.
@@ -95,34 +75,25 @@ else
   SUBMODULE_PATHS=""
 fi
 ```
-
 `SUBMODULE_PATHS` is exported to the `execute_waves` step, where the per-plan decision actually happens (see "Per-plan worktree decision" sub-step inside `execute_waves`). The decision is per-plan because different plans in the same wave can touch different files — only plans whose paths intersect a submodule must drop worktree isolation; plans nowhere near a submodule keep parallel isolation.
-
 When `USE_WORKTREES` (project-level) is `false`, all executor agents run without `isolation="worktree"` — they execute sequentially on the main working tree instead of in parallel worktrees. The per-plan decision below has no effect when worktrees are project-disabled.
-
 Read context window size for adaptive prompt enrichment:
-
 ```bash
 CONTEXT_WINDOW=$(gsd-sdk query config-get context_window 2>/dev/null || echo "200000")
 ```
-
 When `CONTEXT_WINDOW >= 500000` (1M-class models), subagent prompts include richer context:
 - Executor agents receive prior wave SUMMARY.md files and the phase CONTEXT.md/RESEARCH.md
 - Verifier agents receive all PLAN.md, SUMMARY.md, CONTEXT.md files plus REQUIREMENTS.md
 - This enables cross-phase awareness and history-aware verification
-
 When `CONTEXT_WINDOW < 200000` (sub-200K models), subagent prompts are thinned to reduce static overhead:
 - Executor agents omit extended deviation rule examples and checkpoint examples from inline prompt — load on-demand via @~/.claude/get-shit-done/references/executor-examples.md
 - Planner agents omit extended anti-pattern lists and specificity examples from inline prompt — load on-demand via @~/.claude/get-shit-done/references/planner-antipatterns.md
 - Core rules and decision logic remain inline; only verbose examples and edge-case lists are extracted
 - This reduces executor static overhead by ~40% while preserving behavioral correctness
-
 **If `phase_found` is false:** Error — phase directory not found.
 **If `plan_count` is 0:** Error — no plans found in phase.
 **If `state_exists` is false but `.planning/` exists:** Offer reconstruct or continue.
-
 When `parallelization` is false, plans within a wave execute sequentially.
-
 **Runtime detection for Copilot:**
 Check if the current runtime is Copilot by testing for the `@gsd-executor` agent pattern
 or absence of the `Task()` subagent API. If running under Copilot, force sequential inline
@@ -130,7 +101,6 @@ execution regardless of the `parallelization` setting — Copilot's subagent com
 signals are unreliable (see `<runtime_compatibility>`). Set `COPILOT_SEQUENTIAL=true`
 internally and skip the `execute_waves` step in favor of `check_interactive_mode`'s
 inline path for each plan.
-
 **REQUIRED — Sync chain flag with intent.** If user invoked manually (no `--auto`), clear the ephemeral chain flag from any previous interrupted `--auto` chain. This prevents stale `_auto_chain_active: true` from causing unwanted auto-advance. This does NOT touch `workflow.auto_advance` (the user's persistent settings preference). You MUST execute this bash block before any config reads:
 ```bash
 # REQUIRED: prevents stale auto-chain from previous --auto runs
@@ -139,31 +109,21 @@ if [[ ! "$ARGUMENTS" =~ --auto ]]; then
 fi
 ```
 </step>
-
 <step name="check_blocking_antipatterns" priority="first">
 **MANDATORY — Check for blocking anti-patterns before any other work.**
-
 Look for a `.continue-here.md` in the current phase directory:
-
 ```bash
 ls ${phase_dir}/.continue-here.md 2>/dev/null || true
 ```
-
 If `.continue-here.md` exists, parse its "Critical Anti-Patterns" table for rows with `severity` = `blocking`.
-
 **If one or more `blocking` anti-patterns are found:**
-
 This step cannot be skipped. Before proceeding to `check_interactive_mode` or any other step, the agent must demonstrate understanding of each blocking anti-pattern by answering all three questions for each one:
-
 1. **What is this anti-pattern?** — Describe it in your own words, not by quoting the handoff.
 2. **How did it manifest?** — Explain the specific failure that caused it to be recorded.
 3. **What structural mechanism (not acknowledgment) prevents it?** — Name the concrete step, checklist item, or enforcement mechanism that stops recurrence.
-
 Write these answers inline before continuing. If a blocking anti-pattern cannot be answered from the context in `.continue-here.md`, stop and ask the user for clarification.
-
 **If no `.continue-here.md` exists, or no `blocking` rows are found:** Proceed directly to `check_interactive_mode`.
 </step>
-
 <step name="check_interactive_mode">
 **Parse `--interactive` flag from $ARGUMENTS.**
 
@@ -668,6 +628,10 @@ increases monotonically across waves. `{status}` is `complete` (success),
 
 5.5. **Worktree cleanup (when `isolation="worktree"` was used):**
 
+   **Standard wave contract:** Each wave's worktrees merge to main via the templated path below before the next wave's worktrees fork. The cleanup loop runs once per wave at the end of the wave lifecycle. Worktrees created in wave N must be fully removed before wave N+1 forks new ones.
+
+   **Cross-wave dependency deviation (supported execution mode):** When the orchestrator legitimately deviates from the standard wave model — for example, a phase with cross-wave plan dependencies that requires custom inter-worktree base-update merges (e.g., `merge: bring 09-01 + 09-02 into 09-03 base`) — the cleanup loop below is NOT automatically re-entered for those custom merges. The deviation path produces correct final history but bypasses this loop, leaving `worktree-agent-*` directories in place. Use the **cleanup-tail snippet** below to remove any residual worktrees after such a deviation.
+
    When executor agents ran in worktree isolation, their commits land on temporary branches in separate working trees. After the wave completes, merge these changes back and clean up:
 
    ```bash
@@ -802,7 +766,42 @@ increases monotonically across waves. `{status}` is `complete` (success),
    done < <(git worktree list --porcelain | grep "^worktree " | grep "\.claude/worktrees/agent-" | sed 's/^worktree //')
    ```
 
+   **Cleanup-tail snippet (use after any wave whose merges did not flow through the templated path above):**
+
+   If the orchestrator deviated from the standard wave merge path (e.g., custom inter-worktree base-update merges with `merge: bring …` style messages), run this snippet after the custom merges are complete. It discovers and removes any residual `worktree-agent-*` worktrees. Safe to run when no residuals exist — it is a no-op in that case.
+
+   ```bash
+   # Cleanup-tail: remove residual agent worktrees after a cross-wave-dependency deviation.
+   # Inclusion-based filter (#2774): match ONLY agent-spawned worktrees under
+   # `.claude/worktrees/agent-`. Do NOT use exclusion filters (grep -v "$(pwd)$") —
+   # they destroy the parent workspace's .git in multi-workspace or cross-drive setups.
+   # Read line-by-line so worktree paths containing whitespace are preserved (#2774).
+   while IFS= read -r WT; do
+     [ -z "$WT" ] && continue
+     WT_BRANCH=$(git -C "$WT" rev-parse --abbrev-ref HEAD 2>/dev/null)
+     [ -z "$WT_BRANCH" ] || [ "$WT_BRANCH" = "HEAD" ] && continue
+     echo "Cleaning up residual worktree: $WT (branch: $WT_BRANCH)"
+     git worktree unlock "$WT" 2>/dev/null || true
+     if ! git worktree remove "$WT" --force; then
+       WT_NAME=$(basename "$WT")
+       if [ -f ".git/worktrees/${WT_NAME}/locked" ]; then
+         echo "⚠ Worktree $WT is locked — unlock failed; manual cleanup required:"
+         echo "    git worktree unlock \"$WT\" && git worktree remove \"$WT\" --force && git branch -D \"$WT_BRANCH\""
+       else
+         echo "⚠ Residual worktree at $WT — remove failed; manual cleanup required"
+       fi
+     else
+       git branch -D "$WT_BRANCH" 2>/dev/null || true
+     fi
+   done < <(git worktree list --porcelain | grep "^worktree " | grep "\.claude/worktrees/agent-" | sed 's/^worktree //')
+   git worktree prune
+   ```
+
+   **When to skip step 5.5:**
+
    **If no plan in this wave used worktree isolation** (project-level `USE_WORKTREES=false` OR every plan in the wave had `USE_WORKTREES_FOR_PLAN=false` — i.e. `WAVE_WORKTREE_PLANS` from step 2.5 is empty): all agents ran on the main working tree — skip this step entirely.
+
+   **If the orchestrator merged via custom messages (cross-wave-dependency deviation):** the templated cleanup loop above was not triggered for those merges. Run the cleanup-tail snippet above instead. After the snippet completes, proceed to step 5.6.
 
    **If at least one plan used worktrees but others did not:** still run this cleanup — it iterates over actual `git worktree list` output and only merges back the worktrees that were created, leaving sequential plans' commits on the main tree untouched.
 
@@ -890,8 +889,6 @@ increases monotonically across waves. `{status}` is `complete` (success),
    ```
    [checkpoint] phase {PHASE_NUMBER} wave {N}/{M} complete, {P}/{Q} plans done ({wave_success}/{wave_plan_count} ok)
    ```
-
-
 
    For each SUMMARY.md:
    - Verify first 2 files from `key-files.created` exist on disk

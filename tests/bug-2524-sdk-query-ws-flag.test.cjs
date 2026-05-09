@@ -25,6 +25,10 @@ const cliTs = fs.readFileSync(
   path.join(__dirname, '../sdk/src/cli.ts'),
   'utf-8',
 );
+const nativeDispatchAdapterTs = fs.readFileSync(
+  path.join(__dirname, '../sdk/src/query/query-native-dispatch-adapter.ts'),
+  'utf-8',
+);
 
 // ─── Layer 3: planningPaths() accepts workstream ───────────────────────────
 
@@ -86,8 +90,9 @@ describe('QueryRegistry.dispatch() workstream threading', () => {
 describe('CLI forwards --ws to registry.dispatch()', () => {
   test('cli.ts passes args.ws as the workstream argument to registry.dispatch()', () => {
     assert.ok(
-      cliTs.includes('registry.dispatch(matched.cmd, matched.args, args.projectDir, args.ws)'),
-      'cli.ts must forward args.ws to registry.dispatch() as the workstream argument',
+      cliTs.includes('ws: args.ws') &&
+        nativeDispatchAdapterTs.includes('registry.dispatch(command, args, projectDir, ws)'),
+      'gsd-sdk query must forward args.ws through the native dispatch adapter to registry.dispatch()',
     );
   });
 
