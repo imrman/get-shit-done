@@ -303,6 +303,21 @@ describe('unattended upstream sync script', () => {
     assert.equal(mergedPkg.scripts['sync:upstream:dry-run'], 'bash scripts/unattended-upstream-sync.sh --dry-run');
   });
 
+  test('non-preserved file conflicts take upstream content and continue through validation', () => {
+    const fixture = setupRepos();
+    writeFile(fixture.runner, 'README.md', 'local fork readme customization\n');
+    commitAll(fixture.runner, 'local readme customization');
+
+    const result = runScript(fixture, ['--skip-install']);
+
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    assert.match(result.stdout, /upstream-preferred merge resolution for non-preserved paths/);
+    assert.equal(showFromBare(fixture.originBare, 'main', 'README.md'), 'upstream readme');
+    assert.equal(showFromBare(fixture.originBare, 'main', 'SECURITY.md'), 'origin hardened security');
+    assert.match(fs.readFileSync(fixture.validationLog, 'utf8'), /npm test/);
+    assert.equal(fs.existsSync(fixture.installLog), false);
+  });
+
   test('rejects unsafe GSD_SYNC_PRESERVE_PATHS entries before promotion or install', () => {
     const unsafePaths = [
       '/tmp/outside',

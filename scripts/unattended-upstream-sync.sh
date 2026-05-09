@@ -348,6 +348,15 @@ resolve_preserved_conflicts_or_fail() {
 resolve_package_json_conflict() {
   log "Resolving package.json conflict by taking upstream package data and preserving local sync scripts"
   git -C "$SYNC_WORKTREE" checkout --theirs -- package.json
+  preserve_package_json_sync_scripts
+  git -C "$SYNC_WORKTREE" add package.json
+}
+
+preserve_package_json_sync_scripts() {
+  if [ ! -f "$SYNC_WORKTREE/package.json" ]; then
+    return
+  fi
+
   (
     cd "$SYNC_WORKTREE"
     node <<'NODE'
@@ -359,7 +368,6 @@ pkg.scripts['sync:upstream:dry-run'] = 'bash scripts/unattended-upstream-sync.sh
 fs.writeFileSync('package.json', `${JSON.stringify(pkg, null, 2)}\n`);
 NODE
   )
-  git -C "$SYNC_WORKTREE" add package.json
 }
 
 candidate_has_changes() {
@@ -552,11 +560,14 @@ if ! git -C "$SYNC_WORKTREE" merge --ff-only "refs/remotes/${ORIGIN_REMOTE}/${BA
 fi
 
 log "Merging upstream candidate $upstream_sha into temporary candidate"
-if ! git -C "$SYNC_WORKTREE" merge --no-ff --no-edit --no-commit "$upstream_sha"; then
+log "Using upstream-preferred merge resolution for non-preserved paths; hardened preserve paths are restored after merge"
+if ! git -C "$SYNC_WORKTREE" merge --no-ff --no-edit --no-commit -X theirs "$upstream_sha"; then
   resolve_preserved_conflicts_or_fail
 fi
 
 restore_preserved_paths
+preserve_package_json_sync_scripts
+git -C "$SYNC_WORKTREE" add package.json >/dev/null 2>&1 || true
 
 if ! candidate_has_changes; then
   git -C "$SYNC_WORKTREE" merge --abort >/dev/null 2>&1 || true
