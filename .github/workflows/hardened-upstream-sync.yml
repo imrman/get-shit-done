@@ -112,4 +112,5 @@ jobs:
             --log-dir "$RUNNER_TEMP/gsd-upstream-sync" \
             --require-stable-upstream-ref \
             --require-push \
+            --allow-validation-rejection \
             --skip-install

@@ -5,6 +5,7 @@ BASE_BRANCH="main"
 DRY_RUN=0
 REQUIRE_PUSH=0
 REQUIRE_STABLE_UPSTREAM_REF=0
+ALLOW_VALIDATION_REJECTION=0
 SKIP_INSTALL=0
 LOCK_FILE=""
 LOG_DIR=""
@@ -54,6 +55,9 @@ Options:
   --log-dir <path>        Directory for run logs
   --dry-run               Validate only; skip promotion, push, and install
   --require-push          Fail if pushing the validated candidate fails
+  --allow-validation-rejection
+                          Exit successfully when the upstream candidate fails
+                          validation; leave main unchanged
   --skip-install          Promote and push after validation, but do not install into CODEX_HOME
   -h, --help              Show this help
 
@@ -107,6 +111,10 @@ while [ "$#" -gt 0 ]; do
       ;;
     --require-push)
       REQUIRE_PUSH=1
+      shift
+      ;;
+    --allow-validation-rejection)
+      ALLOW_VALIDATION_REJECTION=1
       shift
       ;;
     --skip-install)
@@ -326,23 +334,26 @@ resolve_preserved_conflicts_or_fail() {
 
   for conflict in "${conflicts[@]}"; do
     if [ "$conflict" = "package.json" ]; then
-      continue
-    fi
-    if ! is_preserved_path "$conflict"; then
-      git -C "$SYNC_WORKTREE" merge --abort >/dev/null 2>&1 || true
-      fail "Upstream merge has non-preserved conflict: $conflict"
-    fi
-  done
-
-  log "Resolving merge conflicts from hardened local policy"
-  for conflict in "${conflicts[@]}"; do
-    if [ "$conflict" = "package.json" ]; then
       resolve_package_json_conflict
-    else
+    elif is_preserved_path "$conflict"; then
       restore_path_from_base "$conflict"
+    else
+      resolve_non_preserved_conflict_from_upstream "$conflict"
     fi
   done
   git -C "$SYNC_WORKTREE" add -A
+}
+
+resolve_non_preserved_conflict_from_upstream() {
+  local conflict="$1"
+
+  log "Resolving non-preserved merge conflict from upstream: $conflict"
+  if git -C "$SYNC_WORKTREE" cat-file -e ":3:${conflict}" 2>/dev/null; then
+    git -C "$SYNC_WORKTREE" checkout --theirs -- "$conflict"
+    git -C "$SYNC_WORKTREE" add -- "$conflict"
+  else
+    git -C "$SYNC_WORKTREE" rm -r --ignore-unmatch -- "$conflict" >/dev/null 2>&1 || true
+  fi
 }
 
 resolve_package_json_conflict() {
@@ -394,7 +405,7 @@ run_validation() {
     LC_ALL=C scripts/prompt-injection-scan.sh --diff "$BASE_PRESERVE_REF"
     LC_ALL=C scripts/base64-scan.sh --diff "$BASE_PRESERVE_REF"
     LC_ALL=C scripts/secret-scan.sh --diff "$BASE_PRESERVE_REF"
-  ) || fail "Validation failed"
+  )
 }
 
 promote_local_main() {
@@ -533,6 +544,9 @@ fi
 if [ "$SKIP_INSTALL" -eq 1 ]; then
   log "Skip install enabled; validated source will not be installed into Codex"
 fi
+if [ "$ALLOW_VALIDATION_REJECTION" -eq 1 ]; then
+  log "Validation rejection soft-fail enabled; rejected upstream candidates will not fail this run"
+fi
 load_preserve_paths
 
 run git -C "$REPO_DIR" fetch "$ORIGIN_REMOTE" "$BASE_BRANCH"
@@ -577,9 +591,16 @@ fi
 
 run git -C "$SYNC_WORKTREE" commit -m "chore: sync upstream/${UPSTREAM_REF} into ${BASE_BRANCH}"
 candidate_sha="$(git -C "$SYNC_WORKTREE" rev-parse HEAD)"
-log "Validated candidate commit prepared: $candidate_sha"
+log "Candidate commit prepared for validation: $candidate_sha"
 
-run_validation
+if ! run_validation; then
+  if [ "$ALLOW_VALIDATION_REJECTION" -eq 1 ]; then
+    log "Validation rejected upstream candidate $candidate_sha; ${BASE_BRANCH} was not promoted, pushed, or installed"
+    exit 0
+  fi
+  fail "Validation failed"
+fi
+log "Validation accepted candidate commit: $candidate_sha"
 
 if [ "$DRY_RUN" -eq 1 ]; then
   log "Dry run enabled; validated candidate $candidate_sha was not promoted, pushed, or installed"

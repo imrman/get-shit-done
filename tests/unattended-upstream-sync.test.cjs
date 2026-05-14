@@ -232,6 +232,19 @@ describe('unattended upstream sync script', () => {
     assert.equal(fs.existsSync(fixture.installLog), false);
   });
 
+  test('validation rejection can exit cleanly without promotion for scheduled sync', () => {
+    const fixture = setupRepos({ testExit: 7 });
+
+    const result = runScript(fixture, ['--allow-validation-rejection']);
+
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    assert.match(result.stdout, /Validation rejection soft-fail enabled/);
+    assert.match(result.stdout, /Validation rejected upstream candidate [0-9a-f]{40}/);
+    assert.equal(showFromBare(fixture.originBare, 'main', 'README.md'), 'base readme');
+    assert.equal(showFromBare(fixture.originBare, 'main', 'SECURITY.md'), 'origin hardened security');
+    assert.equal(fs.existsSync(fixture.installLog), false);
+  });
+
   test('reported npm test failures block promotion even when test runner exits zero', () => {
     const fixture = setupRepos({ testOutput: 'ℹ tests 12\nℹ pass 10\nℹ fail 2\n\n✖ failing tests:\n' });
 
@@ -312,6 +325,21 @@ describe('unattended upstream sync script', () => {
 
     assert.equal(result.status, 0, result.stderr || result.stdout);
     assert.match(result.stdout, /upstream-preferred merge resolution for non-preserved paths/);
+    assert.equal(showFromBare(fixture.originBare, 'main', 'README.md'), 'upstream readme');
+    assert.equal(showFromBare(fixture.originBare, 'main', 'SECURITY.md'), 'origin hardened security');
+    assert.match(fs.readFileSync(fixture.validationLog, 'utf8'), /npm test/);
+    assert.equal(fs.existsSync(fixture.installLog), false);
+  });
+
+  test('non-preserved modify-delete conflicts take upstream content and continue through validation', () => {
+    const fixture = setupRepos();
+    fs.rmSync(path.join(fixture.runner, 'README.md'));
+    commitAll(fixture.runner, 'local readme deletion');
+
+    const result = runScript(fixture, ['--skip-install']);
+
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    assert.match(result.stdout, /Resolving non-preserved merge conflict from upstream: README\.md/);
     assert.equal(showFromBare(fixture.originBare, 'main', 'README.md'), 'upstream readme');
     assert.equal(showFromBare(fixture.originBare, 'main', 'SECURITY.md'), 'origin hardened security');
     assert.match(fs.readFileSync(fixture.validationLog, 'utf8'), /npm test/);
