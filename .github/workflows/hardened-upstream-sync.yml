@@ -1,12 +1,10 @@
 name: Hardened Upstream Sync
 
 on:
-  schedule:
-    - cron: '17 5 * * *'
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: hardened-upstream-sync
@@ -18,13 +16,96 @@ env:
   UPSTREAM_RELEASE_REPO: gsd-build/get-shit-done
 
 jobs:
-  sync:
+  resolve:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      upstream_ref: ${{ steps.resolve-release.outputs.upstream_ref }}
+      upstream_sha: ${{ steps.resolve-identities.outputs.upstream_sha }}
+      origin_sha: ${{ steps.resolve-identities.outputs.origin_sha }}
+      candidate_tree_sha: ${{ steps.resolve-identities.outputs.candidate_tree_sha }}
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f  # v6.3.0
+        with:
+          node-version: 24
+
+      - name: Resolve latest stable upstream release
+        id: resolve-release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          release_json="$(
+            gh release list \
+              --repo "$UPSTREAM_RELEASE_REPO" \
+              --exclude-drafts \
+              --exclude-pre-releases \
+              --limit 50 \
+              --json tagName,isDraft,isPrerelease,publishedAt
+          )"
+          stable_tag="$(
+            node -e '
+              const releases = JSON.parse(process.argv[1]);
+              const stable = releases.find((release) =>
+                release &&
+                release.isDraft === false &&
+                release.isPrerelease === false &&
+                /^v?[0-9]+[.][0-9]+[.][0-9]+$/.test(release.tagName || "")
+              );
+              if (stable) process.stdout.write(stable.tagName);
+            ' "$release_json"
+          )"
+
+          if [ -z "$stable_tag" ]; then
+            echo "::error::No stable upstream GitHub release tag found for ${UPSTREAM_RELEASE_REPO}"
+            exit 1
+          fi
+
+          echo "Resolved stable upstream release: ${stable_tag}"
+          printf 'UPSTREAM_REF=%s\n' "$stable_tag" >> "$GITHUB_ENV"
+          printf 'upstream_ref=%s\n' "$stable_tag" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve trusted candidate identities
+        id: resolve-identities
+        shell: bash
+        run: |
+          bash ./scripts/unattended-upstream-sync.sh \
+            --repo "$GITHUB_WORKSPACE" \
+            --base-branch "$BASE_BRANCH" \
+            --upstream-url "$UPSTREAM_REPO" \
+            --upstream-ref "$UPSTREAM_REF" \
+            --log-dir "$RUNNER_TEMP/gsd-upstream-sync-resolution" \
+            --require-stable-upstream-ref \
+            --identity-attest-only \
+            --skip-install
+
+  validate:
+    needs: resolve
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    permissions:
+      contents: read
+    outputs:
+      sync_outcome: ${{ steps.validate-candidate.outputs.sync_outcome }}
+      eligible_for_promotion: ${{ steps.validate-candidate.outputs.eligible_for_promotion }}
     env:
       BASE_BRANCH: main
       UPSTREAM_REPO: https://github.com/gsd-build/get-shit-done.git
-      UPSTREAM_RELEASE_REPO: gsd-build/get-shit-done
+      UPSTREAM_REF: ${{ needs.resolve.outputs.upstream_ref }}
+      EXPECTED_UPSTREAM_SHA: ${{ needs.resolve.outputs.upstream_sha }}
+      EXPECTED_ORIGIN_SHA: ${{ needs.resolve.outputs.origin_sha }}
+      EXPECTED_CANDIDATE_TREE_SHA: ${{ needs.resolve.outputs.candidate_tree_sha }}
 
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
@@ -46,71 +127,512 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-      - name: Resolve latest stable upstream release
+      - name: Validate upstream candidate
+        id: validate-candidate
         shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
-          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/gsd-upstream-sync"
+          outcome_file="$RUNNER_TEMP/gsd-sync-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.outcome"
+          set +e
+          bash ./scripts/unattended-upstream-sync.sh \
+            --repo "$GITHUB_WORKSPACE" \
+            --base-branch "$BASE_BRANCH" \
+            --upstream-url "$UPSTREAM_REPO" \
+            --upstream-ref "$UPSTREAM_REF" \
+            --expected-upstream-sha "$EXPECTED_UPSTREAM_SHA" \
+            --expected-origin-sha "$EXPECTED_ORIGIN_SHA" \
+            --expected-candidate-tree-sha "$EXPECTED_CANDIDATE_TREE_SHA" \
+            --log-dir "$RUNNER_TEMP/gsd-upstream-sync" \
+            --outcome-file "$outcome_file" \
+            --require-stable-upstream-ref \
+            --dry-run
+          sync_exit=$?
+          set -e
 
-          release_json="$(
-            gh release list \
-              --repo "$UPSTREAM_RELEASE_REPO" \
-              --exclude-drafts \
-              --exclude-pre-releases \
-              --limit 50 \
-              --json tagName,isDraft,isPrerelease,publishedAt
-          )"
-
-          stable_tag="$(
-            node -e '
-              const releases = JSON.parse(process.argv[1]);
-              const stable = releases.find((release) =>
-                release &&
-                release.isDraft === false &&
-                release.isPrerelease === false &&
-                /^v?[0-9]+[.][0-9]+[.][0-9]+$/.test(release.tagName || "")
-              );
-              if (stable) process.stdout.write(stable.tagName);
-            ' "$release_json"
-          )"
-
-          if [ -z "$stable_tag" ]; then
-            echo "::error::No stable upstream GitHub release tag found for ${UPSTREAM_RELEASE_REPO}"
-            exit 1
+          sync_outcome="BLOCKED_INFRA"
+          eligible_for_promotion="false"
+          outcome_line=""
+          outcome_lines=()
+          if [ -f "$outcome_file" ] && [ ! -L "$outcome_file" ]; then
+            mapfile -t outcome_lines < "$outcome_file"
+            if [ "${#outcome_lines[@]}" -eq 1 ]; then
+              outcome_line="${outcome_lines[0]}"
+            fi
           fi
 
-          echo "Resolved stable upstream release: ${stable_tag}"
-          printf 'UPSTREAM_REF=%s\n' "$stable_tag" >> "$GITHUB_ENV"
+          case "${sync_exit}:${outcome_line}" in
+            "0:SYNC_OUTCOME=VALIDATED")
+              sync_outcome="VALIDATED"
+              eligible_for_promotion="true"
+              ;;
+            "0:SYNC_OUTCOME=NO_CHANGE")
+              sync_outcome="NO_CHANGE"
+              ;;
+            "2:SYNC_OUTCOME=BLOCKED_VALIDATION")
+              sync_outcome="BLOCKED_VALIDATION"
+              ;;
+            "3:SYNC_OUTCOME=BLOCKED_VALIDATION_SUPPRESSED")
+              sync_outcome="BLOCKED_VALIDATION_SUPPRESSED"
+              ;;
+            *)
+              sync_outcome="BLOCKED_INFRA"
+              ;;
+          esac
 
-      - name: Sync upstream, build, test, scan, and update main
+          printf 'sync_outcome=%s\n' "$sync_outcome" >> "$GITHUB_OUTPUT"
+          printf 'eligible_for_promotion=%s\n' "$eligible_for_promotion" >> "$GITHUB_OUTPUT"
+          printf 'sync_exit=%s\n' "$sync_exit" >> "$GITHUB_OUTPUT"
+
+      - name: Reject non-promotable validation outcome
+        if: steps.validate-candidate.outputs.eligible_for_promotion != 'true' && steps.validate-candidate.outputs.sync_outcome != 'NO_CHANGE'
         shell: bash
         env:
+          SYNC_OUTCOME: ${{ steps.validate-candidate.outputs.sync_outcome }}
+          SYNC_EXIT: ${{ steps.validate-candidate.outputs.sync_exit }}
+        run: |
+          echo "::error::Upstream synchronization is not eligible for promotion: ${SYNC_OUTCOME} (exit ${SYNC_EXIT})"
+          exit 1
+
+  attest:
+    needs: [resolve, validate]
+    if: needs.validate.outputs.eligible_for_promotion == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    outputs:
+      upstream_ref: ${{ steps.record-release.outputs.upstream_ref }}
+      upstream_sha: ${{ steps.attest-identities.outputs.upstream_sha }}
+      origin_sha: ${{ steps.attest-identities.outputs.origin_sha }}
+      candidate_tree_sha: ${{ steps.attest-identities.outputs.candidate_tree_sha }}
+    env:
+      BASE_BRANCH: main
+      UPSTREAM_REPO: https://github.com/gsd-build/get-shit-done.git
+      UPSTREAM_REF: ${{ needs.resolve.outputs.upstream_ref }}
+      EXPECTED_UPSTREAM_SHA: ${{ needs.resolve.outputs.upstream_sha }}
+      EXPECTED_ORIGIN_SHA: ${{ needs.resolve.outputs.origin_sha }}
+      EXPECTED_CANDIDATE_TREE_SHA: ${{ needs.resolve.outputs.candidate_tree_sha }}
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Record trusted release ref
+        id: record-release
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! printf '%s' "$UPSTREAM_REF" | grep -Eq '^v?[0-9]+[.][0-9]+[.][0-9]+$'; then
+            echo "Resolved upstream release ref is not a stable tag" >&2
+            exit 1
+          fi
+          printf 'upstream_ref=%s\n' "$UPSTREAM_REF" >> "$GITHUB_OUTPUT"
+
+      - name: Attest promotion candidate identities
+        id: attest-identities
+        shell: bash
+        run: |
+          bash ./scripts/unattended-upstream-sync.sh \
+            --repo "$GITHUB_WORKSPACE" \
+            --base-branch "$BASE_BRANCH" \
+            --upstream-url "$UPSTREAM_REPO" \
+            --upstream-ref "$UPSTREAM_REF" \
+            --expected-upstream-sha "$EXPECTED_UPSTREAM_SHA" \
+            --expected-origin-sha "$EXPECTED_ORIGIN_SHA" \
+            --expected-candidate-tree-sha "$EXPECTED_CANDIDATE_TREE_SHA" \
+            --log-dir "$RUNNER_TEMP/gsd-upstream-sync-attestation" \
+            --require-stable-upstream-ref \
+            --identity-attest-only \
+            --skip-install
+
+  promote:
+    needs: [validate, attest]
+    if: needs.validate.outputs.eligible_for_promotion == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    outputs:
+      promoted_sha: ${{ steps.record-promotion.outputs.promoted_sha }}
+      promoted_tree_sha: ${{ steps.record-promotion.outputs.promoted_tree_sha }}
+      upstream_ref: ${{ steps.record-promotion.outputs.upstream_ref }}
+      upstream_sha: ${{ steps.record-promotion.outputs.upstream_sha }}
+    env:
+      BASE_BRANCH: main
+      UPSTREAM_REPO: https://github.com/gsd-build/get-shit-done.git
+      UPSTREAM_REF: ${{ needs.attest.outputs.upstream_ref }}
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Configure git identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Promote validated upstream candidate
+        shell: bash
+        env:
+          EXPECTED_UPSTREAM_SHA: ${{ needs.attest.outputs.upstream_sha }}
+          EXPECTED_ORIGIN_SHA: ${{ needs.attest.outputs.origin_sha }}
+          EXPECTED_CANDIDATE_TREE_SHA: ${{ needs.attest.outputs.candidate_tree_sha }}
           GH_PUSH_TOKEN: ${{ github.token }}
         run: |
-          cleanup_git_credentials() {
-            git config --local --unset-all http.https://github.com/.extraheader || true
-          }
-          trap cleanup_git_credentials EXIT
-
+          if [ -z "${UPSTREAM_REF:-}" ]; then
+            echo "UPSTREAM_REF is not set" >&2
+            exit 1
+          fi
+          if [ -z "${EXPECTED_UPSTREAM_SHA:-}" ]; then
+            echo "EXPECTED_UPSTREAM_SHA is not set" >&2
+            exit 1
+          fi
+          if [ -z "${EXPECTED_ORIGIN_SHA:-}" ]; then
+            echo "EXPECTED_ORIGIN_SHA is not set" >&2
+            exit 1
+          fi
+          if [ -z "${EXPECTED_CANDIDATE_TREE_SHA:-}" ]; then
+            echo "EXPECTED_CANDIDATE_TREE_SHA is not set" >&2
+            exit 1
+          fi
+          for identity in "$EXPECTED_UPSTREAM_SHA" "$EXPECTED_ORIGIN_SHA" "$EXPECTED_CANDIDATE_TREE_SHA"; do
+            if ! printf '%s' "$identity" | grep -Eq '^[0-9a-f]{40}$'; then
+              echo "Attested identity is not a full lowercase 40-character SHA" >&2
+              exit 1
+            fi
+          done
           if [ -z "${GH_PUSH_TOKEN:-}" ]; then
             echo "GH_PUSH_TOKEN is not set" >&2
             exit 1
           fi
-
-          printf '::add-mask::%s\n' "$GH_PUSH_TOKEN"
-          auth_header="$(printf 'x-access-token:%s' "$GH_PUSH_TOKEN" | base64 | tr -d '\n')"
-          printf '::add-mask::%s\n' "$auth_header"
-          unset GH_PUSH_TOKEN
-          git config --local http.https://github.com/.extraheader "AUTHORIZATION: basic ${auth_header}"
 
           bash ./scripts/unattended-upstream-sync.sh \
             --repo "$GITHUB_WORKSPACE" \
             --base-branch "$BASE_BRANCH" \
             --upstream-url "$UPSTREAM_REPO" \
             --upstream-ref "$UPSTREAM_REF" \
+            --expected-upstream-sha "$EXPECTED_UPSTREAM_SHA" \
+            --expected-origin-sha "$EXPECTED_ORIGIN_SHA" \
+            --expected-candidate-tree-sha "$EXPECTED_CANDIDATE_TREE_SHA" \
             --log-dir "$RUNNER_TEMP/gsd-upstream-sync" \
             --require-stable-upstream-ref \
             --require-push \
-            --allow-validation-rejection \
+            --trusted-promote-only \
             --skip-install
+
+      - name: Record exact promoted identities
+        id: record-promotion
+        shell: bash
+        env:
+          EXPECTED_CANDIDATE_TREE_SHA: ${{ needs.attest.outputs.candidate_tree_sha }}
+          EXPECTED_UPSTREAM_SHA: ${{ needs.attest.outputs.upstream_sha }}
+        run: |
+          set -euo pipefail
+          promoted_sha="$(git rev-parse HEAD)"
+          promoted_tree_sha="$(git rev-parse 'HEAD^{tree}')"
+          if ! printf '%s' "$promoted_sha" | grep -Eq '^[0-9a-f]{40}$'; then
+            echo "Promoted commit is not a full lowercase 40-character SHA" >&2
+            exit 1
+          fi
+          if [ "$promoted_tree_sha" != "$EXPECTED_CANDIDATE_TREE_SHA" ]; then
+            echo "Promoted tree does not match the attested candidate tree" >&2
+            exit 1
+          fi
+          printf 'promoted_sha=%s\n' "$promoted_sha" >> "$GITHUB_OUTPUT"
+          printf 'promoted_tree_sha=%s\n' "$promoted_tree_sha" >> "$GITHUB_OUTPUT"
+          printf 'upstream_ref=%s\n' "$UPSTREAM_REF" >> "$GITHUB_OUTPUT"
+          printf 'upstream_sha=%s\n' "$EXPECTED_UPSTREAM_SHA" >> "$GITHUB_OUTPUT"
+
+  package_secure_codex:
+    needs: promote
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    outputs:
+      artifact_name: ${{ steps.artifact-name.outputs.artifact_name }}
+      artifact_digest: ${{ steps.upload-bundle.outputs.artifact-digest }}
+    env:
+      PROMOTED_SHA: ${{ needs.promote.outputs.promoted_sha }}
+      PROMOTED_TREE_SHA: ${{ needs.promote.outputs.promoted_tree_sha }}
+      UPSTREAM_REF: ${{ needs.promote.outputs.upstream_ref }}
+      UPSTREAM_SHA: ${{ needs.promote.outputs.upstream_sha }}
+      UPSTREAM_REPO: https://github.com/gsd-build/get-shit-done.git
+      ORIGIN_URL: https://github.com/${{ github.repository }}
+
+    steps:
+      - name: Checkout exact promoted commit
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          ref: ${{ needs.promote.outputs.promoted_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f  # v6.3.0
+        with:
+          node-version: 24
+
+      - name: Prepare exact promoted source
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "$(git rev-parse HEAD)" != "$PROMOTED_SHA" ]; then
+            echo "Checkout does not match the promoted commit" >&2
+            exit 1
+          fi
+          if [ "$(git rev-parse 'HEAD^{tree}')" != "$PROMOTED_TREE_SHA" ]; then
+            echo "Checkout tree does not match the promoted tree" >&2
+            exit 1
+          fi
+          git diff --quiet
+          git diff --cached --quiet
+          if [ -n "$(git status --porcelain=v1 --untracked-files=all)" ]; then
+            echo "Promoted checkout is not clean" >&2
+            exit 1
+          fi
+          git remote add upstream "$UPSTREAM_REPO"
+          git fetch --force --no-tags upstream \
+            "refs/tags/${UPSTREAM_REF}:refs/tags/${UPSTREAM_REF}" \
+            "refs/tags/${UPSTREAM_REF}:refs/remotes/upstream/tags/${UPSTREAM_REF}"
+          if [ "$(git rev-parse "refs/tags/${UPSTREAM_REF}^{commit}")" != "$UPSTREAM_SHA" ]; then
+            echo "Fetched upstream tag does not match the attested upstream commit" >&2
+            exit 1
+          fi
+          if [ "$(git rev-parse "refs/remotes/upstream/tags/${UPSTREAM_REF}^{commit}")" != "$UPSTREAM_SHA" ]; then
+            echo "Fetched upstream tracking ref does not match the attested upstream commit" >&2
+            exit 1
+          fi
+          git diff --quiet
+          git diff --cached --quiet
+          if [ -n "$(git status --porcelain=v1 --untracked-files=all)" ]; then
+            echo "Promoted checkout changed while preparing the upstream identity" >&2
+            exit 1
+          fi
+
+      - name: Build secure Codex bundle
+        shell: bash
+        env:
+          EXPECTED_VERSION: ${{ needs.promote.outputs.upstream_ref }}
+        run: |
+          set -euo pipefail
+          EXPECTED_VERSION="${EXPECTED_VERSION#v}"
+          env GITHUB_SHA="$PROMOTED_SHA" node ./.github/scripts/build-secure-codex-bundle.mjs \
+            --repo "$GITHUB_WORKSPACE" \
+            --staging-root "$RUNNER_TEMP/secure-codex-stage" \
+            --output-dir "$RUNNER_TEMP/secure-codex-output" \
+            --promoted-sha "$PROMOTED_SHA" \
+            --promoted-tree-sha "$PROMOTED_TREE_SHA" \
+            --origin-url "$ORIGIN_URL" \
+            --upstream-url "$UPSTREAM_REPO" \
+            --upstream-ref "$UPSTREAM_REF" \
+            --upstream-sha "$UPSTREAM_SHA" \
+            --expected-version "$EXPECTED_VERSION" \
+            --run-id "$GITHUB_RUN_ID" \
+            --run-attempt "$GITHUB_RUN_ATTEMPT"
+
+      - name: Record secure Codex artifact name
+        id: artifact-name
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf 'artifact_name=secure-codex-%s-%s-%s.zip\n' \
+            "$PROMOTED_SHA" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
+
+      - name: Upload secure Codex bundle
+        id: upload-bundle
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: ${{ steps.artifact-name.outputs.artifact_name }}
+          path: |
+            ${{ runner.temp }}/secure-codex-output/secure-codex-bundle.tar
+            ${{ runner.temp }}/secure-codex-output/secure-codex-manifest.json
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+
+  sign_secure_codex:
+    needs: [promote, package_secure_codex]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: gsd-bundle-signing
+    permissions:
+      contents: read
+    env:
+      EXPECTED_REPOSITORY: ${{ github.repository }}
+      EXPECTED_WORKFLOW_REF: ${{ github.workflow_ref }}
+      EXPECTED_RUN_ID: ${{ github.run_id }}
+      EXPECTED_RUN_ATTEMPT: ${{ github.run_attempt }}
+      EXPECTED_PROMOTED_SHA: ${{ needs.promote.outputs.promoted_sha }}
+      EXPECTED_PROMOTED_TREE_SHA: ${{ needs.promote.outputs.promoted_tree_sha }}
+      EXPECTED_UPSTREAM_REF: ${{ needs.promote.outputs.upstream_ref }}
+      EXPECTED_UPSTREAM_SHA: ${{ needs.promote.outputs.upstream_sha }}
+      EXPECTED_SIGNING_FINGERPRINT: ${{ vars.GSD_BUNDLE_SIGNING_PUBLIC_FINGERPRINT }}
+
+    steps:
+      - name: Download exact unsigned secure Codex bundle
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4.3.0
+        with:
+          name: ${{ needs.package_secure_codex.outputs.artifact_name }}
+          path: ${{ runner.temp }}/secure-codex-signing-input
+
+      - name: Sign and self-verify secure Codex manifest
+        shell: bash
+        env:
+          SIGNING_PRIVATE_KEY: ${{ secrets.GSD_BUNDLE_SIGNING_KEY }}
+        run: |
+          set -euo pipefail
+
+          input_dir="$RUNNER_TEMP/secure-codex-signing-input"
+          output_dir="$RUNNER_TEMP/secure-codex-signed-output"
+          bundle_file="$input_dir/secure-codex-bundle.tar"
+          manifest_file="$input_dir/secure-codex-manifest.json"
+          signature_file="$RUNNER_TEMP/secure-codex-manifest.json.sig"
+          key_file="$RUNNER_TEMP/gsd-bundle-signing-key"
+          public_key_file="$RUNNER_TEMP/gsd-bundle-signing-key.pub"
+          allowed_signers_file="$RUNNER_TEMP/gsd-bundle-allowed-signers"
+          namespace='gsd-secure-codex-bundle@imrman.local'
+          identity='gsd-bundle-signing@imrman.local'
+
+          cleanup() {
+            rm -f -- "$key_file" "$public_key_file" "$allowed_signers_file" "$signature_file"
+          }
+          trap cleanup EXIT
+          trap 'exit 1' HUP INT TERM
+
+          if [ ! -d "$input_dir" ] || [ -L "$input_dir" ]; then
+            echo "Downloaded artifact directory is missing or unsafe" >&2
+            exit 1
+          fi
+          artifact_count="$(find "$input_dir" -mindepth 1 -exec printf x \; | wc -c | tr -d '[:space:]')"
+          if [ "$artifact_count" -ne 2 ]; then
+            echo "Unsigned artifact must contain exactly the bundle tar and manifest" >&2
+            exit 1
+          fi
+          for artifact_file in "$bundle_file" "$manifest_file"; do
+            if [ ! -f "$artifact_file" ] || [ -L "$artifact_file" ]; then
+              echo "Unsigned artifact contains a missing or unsafe required file" >&2
+              exit 1
+            fi
+          done
+          if [ -e "$output_dir" ]; then
+            echo "Signed output directory already exists" >&2
+            exit 1
+          fi
+
+          env -u SIGNING_PRIVATE_KEY \
+            MANIFEST_FILE="$manifest_file" \
+            BUNDLE_FILE="$bundle_file" \
+            node <<'NODE'
+          const crypto = require('node:crypto');
+          const fs = require('node:fs');
+
+          function fail(message) {
+            throw new Error(message);
+          }
+          function exactKeys(value, expected, label) {
+            if (!value || typeof value !== 'object' || Array.isArray(value)) fail(`${label} must be an object`);
+            const actual = Object.keys(value).sort();
+            const wanted = [...expected].sort();
+            if (JSON.stringify(actual) !== JSON.stringify(wanted)) fail(`${label} has unexpected fields`);
+          }
+          function equal(actual, expected, label) {
+            if (typeof expected !== 'string' || !expected || actual !== expected) fail(`${label} identity mismatch`);
+          }
+
+          const manifestBytes = fs.readFileSync(process.env.MANIFEST_FILE);
+          let manifest;
+          try {
+            manifest = JSON.parse(manifestBytes.toString('utf8'));
+          } catch {
+            fail('Manifest is not valid JSON');
+          }
+          const canonical = Buffer.from(`${JSON.stringify(manifest, null, 2)}\n`);
+          if (!manifestBytes.equals(canonical)) fail('Manifest is not canonical JSON');
+
+          exactKeys(manifest, [
+            'format', 'repository', 'promotion', 'version', 'workflow',
+            'transformations', 'entries', 'bundle',
+          ], 'Manifest');
+          exactKeys(manifest.repository, ['github', 'originUrl', 'upstreamUrl'], 'Manifest repository');
+          exactKeys(manifest.promotion, ['commitSha', 'treeSha', 'upstreamRef', 'upstreamSha'], 'Manifest promotion');
+          exactKeys(manifest.workflow, ['ref', 'runId', 'runAttempt'], 'Manifest workflow');
+          exactKeys(manifest.bundle, ['name', 'bytes', 'sha256'], 'Manifest bundle');
+
+          equal(manifest.format, 'gsd-secure-codex-bundle-v1', 'Manifest format');
+          equal(manifest.repository.github, process.env.EXPECTED_REPOSITORY, 'Repository');
+          equal(manifest.repository.originUrl, `https://github.com/${process.env.EXPECTED_REPOSITORY}`, 'Origin URL');
+          equal(manifest.repository.upstreamUrl, 'https://github.com/gsd-build/get-shit-done.git', 'Upstream URL');
+          equal(manifest.promotion.commitSha, process.env.EXPECTED_PROMOTED_SHA, 'Promoted commit');
+          equal(manifest.promotion.treeSha, process.env.EXPECTED_PROMOTED_TREE_SHA, 'Promoted tree');
+          equal(manifest.promotion.upstreamRef, process.env.EXPECTED_UPSTREAM_REF, 'Upstream ref');
+          equal(manifest.promotion.upstreamSha, process.env.EXPECTED_UPSTREAM_SHA, 'Upstream commit');
+          equal(manifest.workflow.ref, process.env.EXPECTED_WORKFLOW_REF, 'Workflow ref');
+          equal(manifest.workflow.runId, process.env.EXPECTED_RUN_ID, 'Workflow run ID');
+          equal(manifest.workflow.runAttempt, process.env.EXPECTED_RUN_ATTEMPT, 'Workflow run attempt');
+          equal(manifest.bundle.name, 'secure-codex-bundle.tar', 'Bundle name');
+
+          const normalizedVersion = process.env.EXPECTED_UPSTREAM_REF.startsWith('v')
+            ? process.env.EXPECTED_UPSTREAM_REF.slice(1)
+            : process.env.EXPECTED_UPSTREAM_REF;
+          equal(manifest.version, normalizedVersion, 'Version');
+          if (!Array.isArray(manifest.transformations) || !Array.isArray(manifest.entries)) {
+            fail('Manifest transformations and entries must be arrays');
+          }
+
+          const bundleBytes = fs.readFileSync(process.env.BUNDLE_FILE);
+          const bundleDigest = crypto.createHash('sha256').update(bundleBytes).digest('hex');
+          if (!Number.isSafeInteger(manifest.bundle.bytes) || manifest.bundle.bytes !== bundleBytes.length) {
+            fail('Bundle byte length mismatch');
+          }
+          equal(manifest.bundle.sha256, bundleDigest, 'Bundle digest');
+          NODE
+
+          if [ -z "${SIGNING_PRIVATE_KEY:-}" ]; then
+            echo "GSD_BUNDLE_SIGNING_KEY is not configured" >&2
+            exit 1
+          fi
+          if ! printf '%s' "${EXPECTED_SIGNING_FINGERPRINT:-}" | grep -Eq '^SHA256:[A-Za-z0-9+/]{43}$'; then
+            echo "GSD_BUNDLE_SIGNING_PUBLIC_FINGERPRINT is missing or invalid" >&2
+            exit 1
+          fi
+
+          umask 077
+          install -m 0600 /dev/null "$key_file"
+          printf '%s\n' "$SIGNING_PRIVATE_KEY" > "$key_file"
+          chmod 0600 "$key_file"
+          ssh-keygen -y -f "$key_file" > "$public_key_file"
+          derived_fingerprint="$(ssh-keygen -l -E sha256 -f "$public_key_file" | awk 'NR == 1 { print $2 }')"
+          if [ "$derived_fingerprint" != "$EXPECTED_SIGNING_FINGERPRINT" ]; then
+            echo "Signing key fingerprint does not match the protected environment fingerprint" >&2
+            exit 1
+          fi
+
+          printf '%s %s\n' "$identity" "$(cat "$public_key_file")" > "$allowed_signers_file"
+          ssh-keygen -Y sign -f "$key_file" -n "$namespace" < "$manifest_file" > "$signature_file"
+          ssh-keygen -Y verify \
+            -f "$allowed_signers_file" \
+            -I "$identity" \
+            -n "$namespace" \
+            -s "$signature_file" < "$manifest_file"
+
+          mkdir -m 0700 "$output_dir"
+          install -m 0600 "$bundle_file" "$output_dir/secure-codex-bundle.tar"
+          install -m 0600 "$manifest_file" "$output_dir/secure-codex-manifest.json"
+          install -m 0600 "$signature_file" "$output_dir/secure-codex-manifest.json.sig"
+
+      - name: Upload signed secure Codex bundle
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: ${{ needs.package_secure_codex.outputs.artifact_name }}-signed
+          path: |
+            ${{ runner.temp }}/secure-codex-signed-output/secure-codex-bundle.tar
+            ${{ runner.temp }}/secure-codex-signed-output/secure-codex-manifest.json
+            ${{ runner.temp }}/secure-codex-signed-output/secure-codex-manifest.json.sig
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
