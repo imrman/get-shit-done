@@ -35,6 +35,9 @@ on:
         default: ''
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 concurrency:
   group: install-smoke-${{ github.workflow }}-${{ github.head_ref || github.run_id }}
   cancel-in-progress: true
@@ -77,6 +80,7 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
         if: steps.skip.outputs.skip != 'true'
         with:
+          persist-credentials: false
           ref: ${{ inputs.ref || github.ref }}
 
       - name: Set up Node.js ${{ matrix.node-version }}
@@ -100,8 +104,18 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          npm pack --silent
-          TARBALL=$(ls get-shit-done-cc-*.tgz | head -1)
+          PACK_OUTPUT="$(npm pack --silent)"
+          TARBALL="$(printf '%s\n' "$PACK_OUTPUT" | tail -n 1)"
+          if [ -z "$TARBALL" ]; then
+            echo "::error::npm pack did not report a tarball path"
+            exit 1
+          fi
+          case "$TARBALL" in
+            ''|'.'|'..'|*/*)
+              echo "::error::npm pack returned an unsafe tarball path: $TARBALL"
+              exit 1
+              ;;
+          esac
           echo "tarball=$TARBALL" >> "$GITHUB_OUTPUT"
           echo "Packed: $TARBALL"
 
@@ -128,10 +142,7 @@ jobs:
           # `--claude --local` is the non-interactive code path (see
           # install.js main block: when both a runtime and location are set,
           # installAllRuntimes runs with isInteractive=false, no prompts).
-          # We tolerate non-zero here because the authoritative assertion is
-          # the next step: gsd-sdk must land on PATH. Some runtime targets
-          # may exit before the SDK step for unrelated reasons on CI.
-          get-shit-done-cc --claude --local || true
+          get-shit-done-cc --claude --local
 
       - name: Assert gsd-sdk resolves on PATH
         if: steps.skip.outputs.skip != 'true'

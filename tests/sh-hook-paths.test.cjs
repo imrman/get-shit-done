@@ -30,9 +30,33 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 
-const { buildHookCommand } = require('../bin/install.js');
+const {
+  buildHookCommand,
+  resolveNodeRunner,
+  rewriteLegacyManagedNodeHookCommands,
+} = require('../bin/install.js');
 
 const INSTALL_SRC = path.join(__dirname, '..', 'bin', 'install.js');
+
+function withExecPath(execPath, fn) {
+  const previousExecPath = process.execPath;
+  Object.defineProperty(process, 'execPath', {
+    value: execPath,
+    writable: true,
+    enumerable: true,
+    configurable: true,
+  });
+  try {
+    return fn();
+  } finally {
+    Object.defineProperty(process, 'execPath', {
+      value: previousExecPath,
+      writable: true,
+      enumerable: true,
+      configurable: true,
+    });
+  }
+}
 
 const SH_HOOKS = [
   { name: 'gsd-validate-commit.sh', commandVar: 'validateCommitCommand' },
@@ -184,6 +208,83 @@ describe('bugs #2045 #2046: .sh hook paths must be absolute and quoted', () => {
 });
 
 describe('hook command shell escaping', () => {
+  test('rewriteLegacyManagedNodeHookCommands handles escaped single quotes in script paths', () => {
+    const settings = {
+      hooks: {
+        PreToolUse: [
+          {
+            hooks: [
+              {
+                type: 'command',
+                command: "node '/tmp/O'\"'\"'Neil/.codex/hooks/gsd-prompt-guard.js'",
+              },
+            ],
+          },
+        ],
+      },
+    };
+    const absoluteRunner = "'/usr/local/bin/node'";
+
+    assert.equal(rewriteLegacyManagedNodeHookCommands(settings, absoluteRunner), true);
+    assert.equal(
+      settings.hooks.PreToolUse[0].hooks[0].command,
+      `${absoluteRunner} '/tmp/O'"'"'Neil/.codex/hooks/gsd-prompt-guard.js'`,
+    );
+  });
+
+  test('rewriteLegacyManagedNodeHookCommands re-quotes legacy double-quoted script paths with shell metacharacters', () => {
+    const settings = {
+      hooks: {
+        PreToolUse: [
+          {
+            hooks: [
+              {
+                type: 'command',
+                command: 'node "/tmp/evil $(touch /tmp/pwn) `uname`/hooks/gsd-prompt-guard.js"',
+              },
+            ],
+          },
+        ],
+      },
+    };
+    const absoluteRunner = "'/usr/local/bin/node'";
+
+    assert.equal(rewriteLegacyManagedNodeHookCommands(settings, absoluteRunner), true);
+    assert.equal(
+      settings.hooks.PreToolUse[0].hooks[0].command,
+      `${absoluteRunner} '/tmp/evil $(touch /tmp/pwn) \`uname\`/hooks/gsd-prompt-guard.js'`,
+    );
+    assert.ok(
+      !settings.hooks.PreToolUse[0].hooks[0].command.includes('"$(touch /tmp/pwn)"'),
+      'migrated script path must not preserve unsafe double-quoted command substitution',
+    );
+  });
+
+  test('buildHookCommand single-quotes absolute node runner so runner metacharacters stay inert', () => {
+    withExecPath("/tmp/node-$(touch /tmp/pwn)-`uname`-it's/bin/node", () => {
+      const command = buildHookCommand('/tmp/gsd', 'gsd-check-update.js');
+
+      assert.strictEqual(
+        command,
+        "'/tmp/node-$(touch /tmp/pwn)-`uname`-it'\"'\"'s/bin/node' '/tmp/gsd/hooks/gsd-check-update.js'"
+      );
+      assert.ok(!command.startsWith('"/tmp/node-$(touch /tmp/pwn)-`uname`'), 'runner must not be double-quoted');
+      assert.ok(command.startsWith("'/tmp/node-$(touch /tmp/pwn)-`uname`"), 'runner must be single-quoted');
+    });
+  });
+
+  test('buildHookCommand uses the absolute node runner for .js hooks', () => {
+    const command = buildHookCommand('/tmp/gsd', 'gsd-check-update.js');
+    assert.strictEqual(
+      command,
+      `${resolveNodeRunner()} '/tmp/gsd/hooks/gsd-check-update.js'`
+    );
+    assert.ok(
+      !command.startsWith('node '),
+      'global .js hooks must not use bare node because GUI/minimal-PATH runtimes fail open'
+    );
+  });
+
   test('buildHookCommand single-quotes absolute paths so $(...) and backticks stay inert', () => {
     const command = buildHookCommand(
       "/tmp/evil $(touch /tmp/pwn) `uname` it's here",
@@ -192,7 +293,7 @@ describe('hook command shell escaping', () => {
 
     assert.strictEqual(
       command,
-      "node '/tmp/evil $(touch /tmp/pwn) `uname` it'\"'\"'s here/hooks/gsd-check-update.js'"
+      `${resolveNodeRunner()} '/tmp/evil $(touch /tmp/pwn) \`uname\` it'"'"'s here/hooks/gsd-check-update.js'`
     );
     assert.ok(!command.includes('"$(touch /tmp/pwn)"'), 'must not leave command substitution inside double quotes');
     assert.ok(!command.includes('"`uname`"'), 'must not leave backticks inside double quotes');
@@ -207,9 +308,9 @@ describe('hook command shell escaping', () => {
 
     assert.strictEqual(
       command,
-      `node "$HOME"'/.codex-$(touch /tmp/pwn)-\`uname\`/hooks/gsd-check-update.js'`
+      `${resolveNodeRunner()} "$HOME"'/.codex-$(touch /tmp/pwn)-\`uname\`/hooks/gsd-check-update.js'`
     );
-    assert.ok(command.startsWith('node "$HOME"'), 'portable hook command must still expand $HOME');
+    assert.ok(command.startsWith(`${resolveNodeRunner()} "$HOME"`), 'portable hook command must still expand $HOME');
     assert.ok(!command.includes('"$HOME/.codex-$(touch /tmp/pwn)-`uname`/hooks/gsd-check-update.js"'),
       'portable hook command must not wrap the substituted path in double quotes');
   });
