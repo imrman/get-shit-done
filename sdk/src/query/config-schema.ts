@@ -1,3 +1,5 @@
+import { VALID_PROFILES } from '../model-catalog.js';
+
 /**
  * SDK-side mirror of get-shit-done/bin/lib/config-schema.cjs.
  *
@@ -83,6 +85,46 @@ export const RUNTIME_STATE_KEYS: ReadonlySet<string> = new Set([
   'workflow._auto_chain_active',
 ]);
 
+const CONFIG_VALUE_DOMAINS: Readonly<Record<string, {
+  readonly expected: string;
+  readonly accepts: (value: unknown) => boolean;
+}>> = {
+  model_profile: {
+    expected: `Valid values: ${VALID_PROFILES.join(', ')}.`,
+    accepts: (value) => typeof value === 'string' && VALID_PROFILES.includes(value),
+  },
+  'workflow.drift_action': {
+    expected: 'Valid values: warn, auto-remap.',
+    accepts: (value) => typeof value === 'string' && ['warn', 'auto-remap'].includes(value),
+  },
+  'workflow.drift_threshold': {
+    expected: 'Must be an integer greater than or equal to 1.',
+    accepts: (value) => typeof value === 'number' && Number.isInteger(value) && value >= 1,
+  },
+  'workflow.post_planning_gaps': {
+    expected: 'Must be a boolean (true or false).',
+    accepts: (value) => typeof value === 'boolean',
+  },
+  'workflow.security_enforcement': {
+    expected: 'Must be a boolean (true or false).',
+    accepts: (value) => typeof value === 'boolean',
+  },
+  'workflow.security_asvs_level': {
+    expected: 'Must be an integer (1, 2, or 3).',
+    accepts: (value) => typeof value === 'number' && Number.isInteger(value) && [1, 2, 3].includes(value),
+  },
+  'workflow.security_block_on': {
+    expected: 'Valid values: high, medium, low.',
+    accepts: (value) => typeof value === 'string' && ['high', 'medium', 'low'].includes(value),
+  },
+};
+
+/** Return the expected domain when a config value is invalid. */
+export function getConfigValueDomainError(keyPath: string, value: unknown): string | undefined {
+  const domain = CONFIG_VALUE_DOMAINS[keyPath];
+  return domain && !domain.accepts(value) ? domain.expected : undefined;
+}
+
 /**
  * Dynamic-pattern validators — keys matching these regexes are also accepted.
  * Each entry's `source` MUST equal the corresponding CJS regex `.source`
@@ -141,8 +183,19 @@ export const DYNAMIC_KEY_PATTERNS: readonly DynamicKeyPattern[] = [
   },
 ];
 
+const PROTOTYPE_RESERVED_CONFIG_SEGMENTS: ReadonlySet<string> = new Set([
+  '__proto__',
+  'prototype',
+  'constructor',
+]);
+
+export function hasPrototypeReservedSegment(keyPath: string): boolean {
+  return keyPath.split('.').some((segment) => PROTOTYPE_RESERVED_CONFIG_SEGMENTS.has(segment));
+}
+
 /** Returns true if keyPath is a valid config key (exact, runtime-state, or dynamic pattern). */
 export function isValidConfigKeyPath(keyPath: string): boolean {
+  if (hasPrototypeReservedSegment(keyPath)) return false;
   if (VALID_CONFIG_KEYS.has(keyPath)) return true;
   if (RUNTIME_STATE_KEYS.has(keyPath)) return true;
   return DYNAMIC_KEY_PATTERNS.some((p) => p.test(keyPath));

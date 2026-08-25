@@ -1,5 +1,5 @@
 /**
- * Config mutation handlers — write operations for .planning/config.json.
+ * Config mutation handlers — project-contained writes for .planning/config.json.
  *
  * Ported from get-shit-done/bin/lib/config.cjs.
  * Provides config-set (with key validation and value coercion),
@@ -10,41 +10,31 @@
  * import { configSet, configNewProject } from './config-mutation.js';
  *
  * await configSet(['model_profile', 'quality'], '/project');
- * // { data: { updated: true, key: 'model_profile', value: 'quality', previousValue: 'balanced' } }
+ * // { data: { updated: true, key: 'model_profile', value: 'quality' } }
  *
  * await configNewProject([], '/project');
- * // { data: { created: true, path: '.planning/config.json' } }
+ * // { data: { created: true, path: '/project/.planning/config.json' } }
  * ```
  */
 
-import { readFile, writeFile, mkdir, rename, unlink } from 'node:fs/promises';
-import { existsSync } from 'node:fs';
+import { readFile, lstat, open, unlink } from 'node:fs/promises';
+import { spawnSync } from 'node:child_process';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
+import { CONFIG_DEFAULTS } from '../config.js';
 import { GSDError, ErrorClassification } from '../errors.js';
+import { assertResolvedPlanningContained, assertResolvedWorkstreamContained } from '../workstream-utils.js';
 import { VALID_PROFILES, getAgentToModelMapForProfile } from './config-query.js';
-import { VALID_CONFIG_KEYS, RUNTIME_STATE_KEYS, DYNAMIC_KEY_PATTERNS } from './config-schema.js';
-import { planningPaths } from './helpers.js';
-import { acquireStateLock, releaseStateLock } from './state-mutation.js';
+import {
+  VALID_CONFIG_KEYS,
+  RUNTIME_STATE_KEYS,
+  DYNAMIC_KEY_PATTERNS,
+  getConfigValueDomainError,
+  isValidConfigKeyPath,
+} from './config-schema.js';
 import { maskIfSecret } from './secrets.js';
 import type { QueryHandler } from './utils.js';
 
-/**
- * Write config JSON atomically via temp file + rename to prevent
- * partial writes on process interruption.
- */
-async function atomicWriteConfig(configPath: string, config: Record<string, unknown>): Promise<void> {
-  const tmpPath = configPath + '.tmp.' + process.pid;
-  const content = JSON.stringify(config, null, 2) + '\n';
-  try {
-    await writeFile(tmpPath, content, 'utf-8');
-    await rename(tmpPath, configPath);
-  } catch {
-    // D5: Rename-failure fallback — clean up temp, fall back to direct write
-    try { await unlink(tmpPath); } catch { /* already gone */ }
-    await writeFile(configPath, content, 'utf-8');
-  }
-}
 
 // ─── VALID_CONFIG_KEYS ────────────────────────────────────────────────────
 // Imported from ./config-schema.js — single source of truth, kept in sync
@@ -85,13 +75,7 @@ const CONFIG_KEY_SUGGESTIONS: Record<string, string> = {
  * @returns Object with valid flag and optional suggestion for typos
  */
 export function isValidConfigKey(keyPath: string): { valid: boolean; suggestion?: string } {
-  if (VALID_CONFIG_KEYS.has(keyPath)) return { valid: true };
-  if (RUNTIME_STATE_KEYS.has(keyPath)) return { valid: true };
-
-  // Dynamic patterns — all sourced from shared config-schema (#2653).
-  // Covers agent_skills.*, review.models.*, features.*,
-  // claude_md_assembly.blocks.*, and model_profile_overrides.*.<tier>.
-  if (DYNAMIC_KEY_PATTERNS.some((p) => p.test(keyPath))) return { valid: true };
+  if (isValidConfigKeyPath(keyPath)) return { valid: true };
 
   // D9: Check curated suggestions before LCP fallback
   if (CONFIG_KEY_SUGGESTIONS[keyPath]) {
@@ -150,48 +134,404 @@ export function parseConfigValue(value: string): unknown {
  * @param dotPath - Dot-notation key path (e.g., 'workflow.auto_advance')
  * @param value - Value to set
  */
-function getValueAtPath(obj: Record<string, unknown>, dotPath: string): unknown {
-  const keys = dotPath.split('.');
-  let current: unknown = obj;
-  for (const key of keys) {
-    if (current === undefined || current === null || typeof current !== 'object') {
-      return undefined;
-    }
-    current = (current as Record<string, unknown>)[key];
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function getConfigValue(config: Record<string, unknown>, dotPath: string): unknown {
+  let current: unknown = config;
+  for (const key of dotPath.split('.')) {
+    if (!isPlainObject(current)) return undefined;
+    current = current[key];
   }
   return current;
 }
 
-function setConfigValue(obj: Record<string, unknown>, dotPath: string, value: unknown): void {
+function setConfigValue(config: Record<string, unknown>, dotPath: string, value: unknown): void {
   const keys = dotPath.split('.');
-  let current: Record<string, unknown> = obj;
-  for (let i = 0; i < keys.length - 1; i++) {
-    const key = keys[i];
-    if (current[key] === undefined || typeof current[key] !== 'object' || current[key] === null) {
-      current[key] = {};
-    }
+  let current = config;
+  for (const key of keys.slice(0, -1)) {
+    if (!isPlainObject(current[key])) current[key] = {};
     current = current[key] as Record<string, unknown>;
   }
   current[keys[keys.length - 1]] = value;
 }
 
+function mergeConfigLayers(...layers: Record<string, unknown>[]): Record<string, unknown> {
+  const merge = (
+    base: Record<string, unknown>,
+    override: Record<string, unknown>,
+  ): Record<string, unknown> => {
+    const result = { ...base };
+    for (const [key, value] of Object.entries(override)) {
+      result[key] = isPlainObject(value) && isPlainObject(result[key])
+        ? merge(result[key] as Record<string, unknown>, value)
+        : structuredClone(value);
+    }
+    return result;
+  };
+
+  let merged: Record<string, unknown> = {};
+  for (const layer of layers) {
+    merged = merge(merged, layer);
+  }
+  return merged;
+}
+
+function assertValidConfigValue(keyPath: string, value: unknown): void {
+  const expected = getConfigValueDomainError(keyPath, value);
+  if (expected) {
+    throw new GSDError(`Invalid ${keyPath} '${String(value)}'. ${expected}`, ErrorClassification.Validation);
+  }
+}
+
+const ATOMIC_WRITE_CHILD = String.raw`
+'use strict';
+const fs = require('node:fs');
+const crypto = require('node:crypto');
+
+try {
+  const expectedDev = BigInt(process.argv[1]);
+  const expectedIno = BigInt(process.argv[2]);
+  const targetName = process.argv[3];
+  const expectedPath = process.argv[4];
+  const parent = fs.statSync('.', { bigint: true });
+  if (parent.dev !== expectedDev || parent.ino !== expectedIno || fs.realpathSync('.') !== expectedPath) {
+    throw new Error('Refusing to write through replaced parent directory');
+  }
+
+  const tmpName = targetName + '.tmp.' + process.ppid + '.' + crypto.randomBytes(16).toString('hex');
+  let identity;
+  try {
+    const fd = fs.openSync(tmpName, 'wx');
+    try {
+      identity = fs.fstatSync(fd, { bigint: true });
+      fs.writeFileSync(fd, fs.readFileSync(0));
+      fs.fsyncSync(fd);
+    } finally {
+      fs.closeSync(fd);
+    }
+    const current = fs.lstatSync(tmpName, { bigint: true });
+    if (!current.isFile() || current.dev !== identity.dev || current.ino !== identity.ino) {
+      throw new Error('Refusing to rename replaced temporary file');
+    }
+    fs.renameSync(tmpName, targetName);
+  } catch (err) {
+    if (identity) {
+      try {
+        const current = fs.lstatSync(tmpName, { bigint: true });
+        if (current.isFile() && current.dev === identity.dev && current.ino === identity.ino) {
+          fs.unlinkSync(tmpName);
+        }
+      } catch { /* already gone or replaced */ }
+    }
+    throw err;
+  }
+} catch (err) {
+  process.stderr.write(err && err.message ? err.message : String(err));
+  process.exitCode = 1;
+}
+`;
+
+interface FileIdentity {
+  dev: bigint;
+  ino: bigint;
+}
+
+interface ConfigMutationTarget extends FileIdentity {
+  configPath: string;
+  planningDir: string;
+}
+
+interface PlanningLock extends FileIdentity {
+  path: string;
+}
+
+function sameIdentity(left: FileIdentity, right: FileIdentity): boolean {
+  return left.dev === right.dev && left.ino === right.ino;
+}
+
+function errorCode(err: unknown): string | undefined {
+  return typeof err === 'object' && err !== null && 'code' in err
+    ? String((err as { code?: unknown }).code)
+    : undefined;
+}
+
+async function resolveConfigMutationTarget(
+  projectDir: string,
+  workstream?: string,
+): Promise<ConfigMutationTarget> {
+  const planningDir = workstream
+    ? await assertResolvedWorkstreamContained(projectDir, workstream)
+    : await assertResolvedPlanningContained(projectDir);
+  if (!planningDir) {
+    throw new GSDError('Unable to resolve project-contained planning directory', ErrorClassification.Validation);
+  }
+  try {
+    const stat = await lstat(planningDir, { bigint: true });
+    if (stat.isSymbolicLink() || !stat.isDirectory()) throw new Error('unsafe planning directory');
+    return {
+      configPath: join(planningDir, 'config.json'),
+      planningDir,
+      dev: stat.dev,
+      ino: stat.ino,
+    };
+  } catch (err: unknown) {
+    const detail = err instanceof Error ? err.message : String(err);
+    throw new GSDError(`Planning directory is unavailable for config mutation: ${detail}`, ErrorClassification.Validation);
+  }
+}
+
+async function readConfigFile(configPath: string): Promise<{
+  exists: boolean;
+  config: Record<string, unknown>;
+}> {
+  try {
+    const before = await lstat(configPath, { bigint: true });
+    if (before.isSymbolicLink() || !before.isFile()) {
+      throw new GSDError('Refusing to read unsafe config.json', ErrorClassification.Validation);
+    }
+    const raw = await readFile(configPath, 'utf-8');
+    const after = await lstat(configPath, { bigint: true });
+    if (!after.isFile() || before.dev !== after.dev || before.ino !== after.ino) {
+      throw new GSDError('config.json changed identity while being read', ErrorClassification.Validation);
+    }
+    const parsed = JSON.parse(raw) as unknown;
+    if (!isPlainObject(parsed)) {
+      throw new GSDError('config.json must contain a JSON object', ErrorClassification.Validation);
+    }
+    return { exists: true, config: parsed };
+  } catch (err: unknown) {
+    const code = typeof err === 'object' && err !== null && 'code' in err
+      ? (err as { code?: unknown }).code
+      : undefined;
+    if (code === 'ENOENT') return { exists: false, config: {} };
+    if (err instanceof GSDError) throw err;
+    const detail = err instanceof Error ? err.message : String(err);
+    throw new GSDError(`Failed to read config.json: ${detail}`, ErrorClassification.Validation);
+  }
+}
+
+const PLANNING_LOCK_TIMEOUT_MS = 10_000;
+const PLANNING_LOCK_STALE_MS = 30_000;
+const PLANNING_LOCK_RETRY_MS = 100;
+
+async function releasePlanningLock(lock: PlanningLock): Promise<void> {
+  try {
+    const current = await lstat(lock.path, { bigint: true });
+    if (current.isFile() && !current.isSymbolicLink() && sameIdentity(current, lock)) {
+      await unlink(lock.path);
+    }
+  } catch { /* already released or parent replaced */ }
+}
+
+async function acquirePlanningLock(
+  target: ConfigMutationTarget,
+  projectDir: string,
+): Promise<PlanningLock> {
+  const lockPath = join(target.planningDir, '.lock');
+  const started = Date.now();
+
+  while (Date.now() - started < PLANNING_LOCK_TIMEOUT_MS) {
+    let handle;
+    let createdLock: PlanningLock | undefined;
+    try {
+      handle = await open(lockPath, 'wx');
+      const identity = await handle.stat({ bigint: true });
+      createdLock = { path: lockPath, dev: identity.dev, ino: identity.ino };
+      await handle.writeFile(JSON.stringify({
+        pid: process.pid,
+        cwd: projectDir,
+        acquired: new Date().toISOString(),
+      }));
+      await handle.close();
+      handle = undefined;
+
+      const currentParent = await lstat(target.planningDir, { bigint: true });
+      if (!currentParent.isDirectory() || currentParent.isSymbolicLink() ||
+        !sameIdentity(currentParent, target)) {
+        await releasePlanningLock(createdLock);
+        throw new GSDError('Planning directory changed while acquiring config lock', ErrorClassification.Validation);
+      }
+      return createdLock;
+    } catch (err: unknown) {
+      if (handle) await handle.close().catch(() => undefined);
+      if (createdLock && errorCode(err) !== 'EEXIST') await releasePlanningLock(createdLock);
+      if (errorCode(err) !== 'EEXIST') throw err;
+
+      try {
+        const existing = await lstat(lockPath, { bigint: true });
+        if (existing.isSymbolicLink() || !existing.isFile()) {
+          throw new GSDError('Refusing unsafe planning lock', ErrorClassification.Validation);
+        }
+        if (Date.now() - Number(existing.mtimeMs) > PLANNING_LOCK_STALE_MS) {
+          const current = await lstat(lockPath, { bigint: true });
+          if (current.isFile() && !current.isSymbolicLink() && sameIdentity(existing, current)) {
+            await unlink(lockPath);
+            continue;
+          }
+        }
+      } catch (lockErr: unknown) {
+        if (errorCode(lockErr) !== 'ENOENT') throw lockErr;
+        continue;
+      }
+
+      await new Promise<void>((resolve) => setTimeout(resolve, PLANNING_LOCK_RETRY_MS));
+    }
+  }
+
+  throw new GSDError('Timed out waiting for active planning lock', ErrorClassification.Validation);
+}
+
+async function atomicWriteConfig(
+  target: ConfigMutationTarget,
+  config: Record<string, unknown>,
+): Promise<void> {
+  const parent = await lstat(target.planningDir, { bigint: true });
+  if (parent.isSymbolicLink() || !parent.isDirectory() || !sameIdentity(parent, target)) {
+    throw new GSDError('Refusing to write through unsafe planning directory', ErrorClassification.Validation);
+  }
+  const result = spawnSync(
+    process.execPath,
+    [
+      '-e',
+      ATOMIC_WRITE_CHILD,
+      target.dev.toString(),
+      target.ino.toString(),
+      basename(target.configPath),
+      target.planningDir,
+    ],
+    {
+      cwd: target.planningDir,
+      input: Buffer.from(`${JSON.stringify(config, null, 2)}\n`, 'utf-8'),
+      stdio: ['pipe', 'ignore', 'pipe'],
+      maxBuffer: 1024 * 1024,
+    },
+  );
+  if (result.error) throw result.error;
+  if (result.status !== 0) {
+    const detail = result.stderr?.toString('utf-8').trim() || 'atomic write child failed';
+    throw new GSDError(`Failed to write config.json: ${detail}`, ErrorClassification.Validation);
+  }
+}
+
+async function withConfigLock<T>(
+  projectDir: string,
+  workstream: string | undefined,
+  operation: (target: ConfigMutationTarget) => Promise<T>,
+): Promise<T> {
+  const target = await resolveConfigMutationTarget(projectDir, workstream);
+  const lock = await acquirePlanningLock(target, projectDir);
+  try {
+    const revalidated = await resolveConfigMutationTarget(projectDir, workstream);
+    if (revalidated.configPath !== target.configPath || !sameIdentity(revalidated, target)) {
+      throw new GSDError('Planning directory changed during config mutation', ErrorClassification.Validation);
+    }
+    return await operation(target);
+  } finally {
+    await releasePlanningLock(lock);
+  }
+}
+
+const VALID_CONFIG_SECTIONS: ReadonlySet<string> = new Set([
+  ...[...VALID_CONFIG_KEYS, ...RUNTIME_STATE_KEYS]
+    .filter((key) => key.includes('.'))
+    .map((key) => key.split('.')[0]),
+  ...DYNAMIC_KEY_PATTERNS.map((pattern) => pattern.description.split('.')[0]),
+  'git',
+  'workflow',
+  'hooks',
+  'agent_skills',
+  'features',
+  'review',
+  'models',
+  'dynamic_routing',
+  'model_overrides',
+  'model_profile_overrides',
+  'claude_md_assembly',
+]);
+
+function assertValidConfigSection(sectionName: string): void {
+  if (sectionName.includes('.') || !VALID_CONFIG_SECTIONS.has(sectionName)) {
+    throw new GSDError(`Unknown config section: "${sectionName}"`, ErrorClassification.Validation);
+  }
+}
+
+function isValidConfigObjectPrefix(path: string): boolean {
+  if ([...VALID_CONFIG_KEYS, ...RUNTIME_STATE_KEYS].some((key) => key.startsWith(`${path}.`))) {
+    return true;
+  }
+  if (path === 'review.models') return true;
+  if (path === 'claude_md_assembly.blocks') return true;
+  if (path === 'dynamic_routing.tier_models') return true;
+  return /^model_profile_overrides\.[a-zA-Z0-9_-]+$/.test(path) &&
+    isValidConfigKey(`${path}.opus`).valid;
+}
+
+function assertValidConfigPolicy(config: Record<string, unknown>, source: string): void {
+  const visit = (value: unknown, path: string): void => {
+    assertValidConfigValue(path, value);
+
+    if (isPlainObject(value)) {
+      const entries = Object.entries(value);
+      if (!path.includes('.')) {
+        assertValidConfigSection(path);
+      } else if ((entries.length === 0 && !isValidConfigKey(path).valid) ||
+        (entries.length > 0 && !isValidConfigObjectPrefix(path))) {
+        const validation = isValidConfigKey(path);
+        const suggestion = validation.suggestion ? `. Did you mean: ${validation.suggestion}?` : '';
+        throw new GSDError(
+          `Unknown config key in ${source}: "${path}"${suggestion}`,
+          ErrorClassification.Validation,
+        );
+      }
+
+      for (const [childKey, childValue] of entries) {
+        visit(childValue, `${path}.${childKey}`);
+      }
+      return;
+    }
+
+    if (!path.includes('.') && VALID_CONFIG_SECTIONS.has(path)) {
+      throw new GSDError(
+        `Invalid config section "${path}" in ${source}: expected object`,
+        ErrorClassification.Validation,
+      );
+    }
+
+    const validation = isValidConfigKey(path);
+    if (!validation.valid) {
+      const suggestion = validation.suggestion ? `. Did you mean: ${validation.suggestion}?` : '';
+      throw new GSDError(
+        `Unknown config key in ${source}: "${path}"${suggestion}`,
+        ErrorClassification.Validation,
+      );
+    }
+  };
+
+  for (const [key, value] of Object.entries(config)) {
+    visit(value, key);
+  }
+}
+
 // ─── configSet ────────────────────────────────────────────────────────────
 
 /**
- * Write a validated key-value pair to config.json.
+ * Validate and write a key-value pair to config.json.
  *
- * Validates key against VALID_CONFIG_KEYS allowlist, coerces value
- * from CLI string to native type, and writes config.json.
+ * Validates key against VALID_CONFIG_KEYS and coerces the CLI string value.
  *
  * @param args - args[0]=key, args[1]=value
  * @param projectDir - Project root directory
- * @returns QueryResult matching gsd-tools `config-set` JSON: `{ updated, key, value, previousValue }`
- * @throws GSDError with Validation if key is invalid or args missing
+ * @throws GSDError with Validation if input or the mutation path is unsafe
  */
 export const configSet: QueryHandler = async (args, projectDir, workstream) => {
   const keyPath = args[0];
   const rawValue = args[1];
   if (!keyPath) {
+    throw new GSDError('Usage: config-set <key.path> <value>', ErrorClassification.Validation);
+  }
+  if (rawValue === undefined) {
     throw new GSDError('Usage: config-set <key.path> <value>', ErrorClassification.Validation);
   }
 
@@ -204,7 +544,8 @@ export const configSet: QueryHandler = async (args, projectDir, workstream) => {
     );
   }
 
-  const parsedValue = rawValue !== undefined ? parseConfigValue(rawValue) : rawValue;
+  const parsedValue = parseConfigValue(rawValue);
+  assertValidConfigValue(keyPath, parsedValue);
 
   // D8: Context value validation (match CJS config.cjs:357-359)
   const VALID_CONTEXT_VALUES = ['dev', 'research', 'review'];
@@ -215,50 +556,32 @@ export const configSet: QueryHandler = async (args, projectDir, workstream) => {
     );
   }
 
-  // D6: Lock protection for read-modify-write (match CJS config.cjs:296)
-  const paths = planningPaths(projectDir, workstream);
-  const lockPath = await acquireStateLock(paths.config);
-  let previousValue: unknown;
-  try {
-    let config: Record<string, unknown> = {};
-    try {
-      const raw = await readFile(paths.config, 'utf-8');
-      config = JSON.parse(raw) as Record<string, unknown>;
-    } catch {
-      // Start with empty config if file doesn't exist or is malformed
-    }
-
-    previousValue = getValueAtPath(config, keyPath);
+  return withConfigLock(projectDir, workstream, async (target) => {
+    const { config } = await readConfigFile(target.configPath);
+    const previousValue = getConfigValue(config, keyPath);
     setConfigValue(config, keyPath, parsedValue);
-    await atomicWriteConfig(paths.config, config);
-  } finally {
-    await releaseStateLock(lockPath);
-  }
+    await atomicWriteConfig(target, config);
 
-  // Mask plaintext for keys in SECRET_CONFIG_KEYS to match CJS behavior at
-  // config.cjs:362-370 — without this, `gsd-sdk query config-set brave_search XXX`
-  // would echo the plaintext credential into machine-readable output. (#2997)
-  // The on-disk value is intentionally NOT masked — only the response.
-  const data: Record<string, unknown> = {
-    updated: true,
-    key: keyPath,
-    value: maskIfSecret(keyPath, parsedValue),
-  };
-  if (previousValue !== undefined) {
-    data.previousValue = maskIfSecret(keyPath, previousValue);
-  }
-  return { data };
+    const data: Record<string, unknown> = {
+      updated: true,
+      key: keyPath,
+      value: maskIfSecret(keyPath, parsedValue),
+    };
+    if (previousValue !== undefined) {
+      data.previousValue = maskIfSecret(keyPath, previousValue);
+    }
+    return { data };
+  });
 };
 
 // ─── configSetModelProfile ────────────────────────────────────────────────
 
 /**
- * Validate and set the model profile in config.json.
+ * Validate and write a model profile to config.json.
  *
  * @param args - args[0]=profileName
  * @param projectDir - Project root directory
- * @returns QueryResult with { set: true, profile, agents }
- * @throws GSDError with Validation if profile is invalid
+ * @throws GSDError with Validation if profile or the mutation path is invalid
  */
 export const configSetModelProfile: QueryHandler = async (args, projectDir, workstream) => {
   const profileName = args[0];
@@ -277,56 +600,38 @@ export const configSetModelProfile: QueryHandler = async (args, projectDir, work
     );
   }
 
-  // D6: Lock protection for read-modify-write
-  const paths = planningPaths(projectDir, workstream);
-  const lockPath = await acquireStateLock(paths.config);
-  let previousProfile = 'balanced';
-  try {
-    let config: Record<string, unknown> = {};
-    try {
-      const raw = await readFile(paths.config, 'utf-8');
-      config = JSON.parse(raw) as Record<string, unknown>;
-    } catch {
-      // Start with empty config
-    }
-
-    const prev =
-      typeof config.model_profile === 'string' ? config.model_profile.toLowerCase().trim() : '';
-    previousProfile = VALID_PROFILES.includes(prev) ? prev : 'balanced';
+  return withConfigLock(projectDir, workstream, async (target) => {
+    const { config } = await readConfigFile(target.configPath);
+    const previous = typeof config.model_profile === 'string'
+      ? config.model_profile.toLowerCase().trim()
+      : '';
+    const previousProfile = VALID_PROFILES.includes(previous) ? previous : 'balanced';
     config.model_profile = normalized;
-    await atomicWriteConfig(paths.config, config);
-  } finally {
-    await releaseStateLock(lockPath);
-  }
-
-  const agentToModelMap = getAgentToModelMapForProfile(normalized);
-  return {
-    data: {
-      updated: true,
-      profile: normalized,
-      previousProfile,
-      agentToModelMap,
-    },
-  };
+    await atomicWriteConfig(target, config);
+    return {
+      data: {
+        updated: true,
+        profile: normalized,
+        previousProfile,
+        agentToModelMap: getAgentToModelMapForProfile(normalized),
+      },
+    };
+  });
 };
 
 // ─── configNewProject ─────────────────────────────────────────────────────
 
 /**
- * Create config.json with defaults and optional user choices.
- *
- * Idempotent: if config.json already exists, returns { created: false }.
- * Detects API key availability from environment variables.
+ * Create config.json from validated defaults and optional user choices.
  *
  * @param args - args[0]=optional JSON string of user choices
  * @param projectDir - Project root directory
- * @returns QueryResult with { created: true, path } or { created: false, reason }
+ * @returns QueryResult with created status and the contained config path
  */
 export const configNewProject: QueryHandler = async (args, projectDir, workstream) => {
-  const paths = planningPaths(projectDir, workstream);
 
-  // Idempotent: don't overwrite existing config
-  if (existsSync(paths.config)) {
+  const initialTarget = await resolveConfigMutationTarget(projectDir, workstream);
+  if ((await readConfigFile(initialTarget.configPath)).exists) {
     return { data: { created: false, reason: 'already_exists' } };
   }
 
@@ -339,140 +644,78 @@ export const configNewProject: QueryHandler = async (args, projectDir, workstrea
       const msg = err instanceof Error ? err.message : String(err);
       throw new GSDError(`Invalid JSON for config-new-project: ${msg}`, ErrorClassification.Validation);
     }
-  }
-
-  // Ensure .planning directory exists
-  const planningDir = paths.planning;
-  if (!existsSync(planningDir)) {
-    await mkdir(planningDir, { recursive: true });
+    if (!isPlainObject(userChoices)) {
+      throw new GSDError('Invalid JSON for config-new-project: expected object', ErrorClassification.Validation);
+    }
+    assertValidConfigPolicy(userChoices, 'config-new-project user choices');
   }
 
   // D11: Load global defaults from ~/.gsd/defaults.json if present
   const homeDir = homedir();
+  const defaultsPath = join(homeDir, '.gsd', 'defaults.json');
   let globalDefaults: Record<string, unknown> = {};
   try {
-    const defaultsPath = join(homeDir, '.gsd', 'defaults.json');
     const defaultsRaw = await readFile(defaultsPath, 'utf-8');
-    globalDefaults = JSON.parse(defaultsRaw) as Record<string, unknown>;
-  } catch {
+    const parsedGlobalDefaults = JSON.parse(defaultsRaw) as unknown;
+    if (!isPlainObject(parsedGlobalDefaults)) {
+      throw new GSDError('Invalid global defaults: expected object', ErrorClassification.Validation);
+    }
+    assertValidConfigPolicy(parsedGlobalDefaults, 'global defaults');
+    globalDefaults = parsedGlobalDefaults;
+  } catch (err: unknown) {
+    if (err instanceof GSDError) {
+      throw err;
+    }
+    if (err instanceof SyntaxError) {
+      throw new GSDError(`Invalid global defaults JSON: ${err.message}`, ErrorClassification.Validation);
+    }
+    const code = typeof err === 'object' && err !== null && 'code' in err
+      ? (err as { code?: unknown }).code
+      : undefined;
+    if (code !== 'ENOENT') {
+      throw err;
+    }
     // No global defaults — continue with hardcoded defaults only
   }
 
-  // Detect API key availability (boolean only, never store keys)
-  const hasBraveSearch = !!(process.env.BRAVE_API_KEY || existsSync(join(homeDir, '.gsd', 'brave_api_key')));
-  const hasFirecrawl = !!(process.env.FIRECRAWL_API_KEY || existsSync(join(homeDir, '.gsd', 'firecrawl_api_key')));
-  const hasExaSearch = !!(process.env.EXA_API_KEY || existsSync(join(homeDir, '.gsd', 'exa_api_key')));
+  const defaults = structuredClone(CONFIG_DEFAULTS) as unknown as Record<string, unknown>;
+  defaults.brave_search = !!(process.env.BRAVE_API_KEY || await readFile(join(homeDir, '.gsd', 'brave_api_key')).then(() => true, () => false));
+  defaults.firecrawl = !!(process.env.FIRECRAWL_API_KEY || await readFile(join(homeDir, '.gsd', 'firecrawl_api_key')).then(() => true, () => false));
+  defaults.exa_search = !!(process.env.EXA_API_KEY || await readFile(join(homeDir, '.gsd', 'exa_api_key')).then(() => true, () => false));
+  const config = mergeConfigLayers(defaults, globalDefaults, userChoices);
+  assertValidConfigPolicy(config, 'new project config');
 
-  // Build default config
-  const defaults: Record<string, unknown> = {
-    model_profile: 'balanced',
-    commit_docs: false,
-    parallelization: 1,
-    search_gitignored: false,
-    brave_search: hasBraveSearch,
-    firecrawl: hasFirecrawl,
-    exa_search: hasExaSearch,
-    git: {
-      branching_strategy: 'none',
-      phase_branch_template: 'gsd/phase-{phase}-{slug}',
-      milestone_branch_template: 'gsd/{milestone}-{slug}',
-      quick_branch_template: null,
-    },
-    workflow: {
-      research: true,
-      plan_check: true,
-      verifier: true,
-      nyquist_validation: true,
-      auto_advance: false,
-      node_repair: true,
-      node_repair_budget: 2,
-      ui_phase: true,
-      ui_safety_gate: true,
-      text_mode: false,
-      research_before_questions: false,
-      discuss_mode: 'discuss',
-      skip_discuss: false,
-      code_review: true,
-      code_review_depth: 'standard',
-    },
-    hooks: {
-      context_warnings: true,
-    },
-    project_code: null,
-    phase_naming: 'sequential',
-    agent_skills: {},
-    features: {},
-  };
-
-  // Deep merge: hardcoded <- globalDefaults <- userChoices (D11)
-  const config: Record<string, unknown> = {
-    ...defaults,
-    ...globalDefaults,
-    ...userChoices,
-    git: {
-      ...(defaults.git as Record<string, unknown>),
-      ...((globalDefaults.git as Record<string, unknown>) || {}),
-      ...((userChoices.git as Record<string, unknown>) || {}),
-    },
-    workflow: {
-      ...(defaults.workflow as Record<string, unknown>),
-      ...((globalDefaults.workflow as Record<string, unknown>) || {}),
-      ...((userChoices.workflow as Record<string, unknown>) || {}),
-    },
-    hooks: {
-      ...(defaults.hooks as Record<string, unknown>),
-      ...((globalDefaults.hooks as Record<string, unknown>) || {}),
-      ...((userChoices.hooks as Record<string, unknown>) || {}),
-    },
-    agent_skills: {
-      ...((defaults.agent_skills as Record<string, unknown>) || {}),
-      ...((globalDefaults.agent_skills as Record<string, unknown>) || {}),
-      ...((userChoices.agent_skills as Record<string, unknown>) || {}),
-    },
-    features: {
-      ...((defaults.features as Record<string, unknown>) || {}),
-      ...((globalDefaults.features as Record<string, unknown>) || {}),
-      ...((userChoices.features as Record<string, unknown>) || {}),
-    },
-  };
-
-  await atomicWriteConfig(paths.config, config);
-
-  return { data: { created: true, path: paths.config } };
+  return withConfigLock(projectDir, workstream, async (target) => {
+    if ((await readConfigFile(target.configPath)).exists) {
+      return { data: { created: false, reason: 'already_exists' } };
+    }
+    await atomicWriteConfig(target, config);
+    return { data: { created: true, path: target.configPath } };
+  });
 };
 
 // ─── configEnsureSection ──────────────────────────────────────────────────
 
 /**
- * Idempotently ensure a top-level section exists in config.json.
- *
- * If the section key doesn't exist, creates it as an empty object.
- * If it already exists, preserves its contents.
+ * Idempotently ensure a validated top-level section exists in config.json.
  *
  * @param args - args[0]=sectionName
  * @param projectDir - Project root directory
- * @returns QueryResult with { ensured: true, section }
+ * @throws GSDError with Validation if section or the mutation path is invalid
  */
 export const configEnsureSection: QueryHandler = async (args, projectDir, workstream) => {
   const sectionName = args[0];
   if (!sectionName) {
     throw new GSDError('Usage: config-ensure-section <section>', ErrorClassification.Validation);
   }
+  assertValidConfigSection(sectionName);
 
-  const paths = planningPaths(projectDir, workstream);
-  let config: Record<string, unknown> = {};
-  try {
-    const raw = await readFile(paths.config, 'utf-8');
-    config = JSON.parse(raw) as Record<string, unknown>;
-  } catch {
-    // Start with empty config
-  }
-
-  if (!(sectionName in config)) {
-    config[sectionName] = {};
-  }
-
-  await atomicWriteConfig(paths.config, config);
-
-  return { data: { ensured: true, section: sectionName } };
+  return withConfigLock(projectDir, workstream, async (target) => {
+    const { config } = await readConfigFile(target.configPath);
+    if (!(sectionName in config)) {
+      config[sectionName] = {};
+      await atomicWriteConfig(target, config);
+    }
+    return { data: { ensured: true, section: sectionName } };
+  });
 };

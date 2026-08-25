@@ -1,16 +1,19 @@
 import { describe, it, expect } from 'vitest';
 import * as query from './index.js';
+import * as assembly from './registry-assembly.js';
+import * as registry from './registry.js';
+import * as normalize from './normalize-query-command.js';
 
 describe('query index thin seam', () => {
   it('re-exports registry assembly seam', () => {
-    expect(typeof query.createRegistry).toBe('function');
-    expect(typeof query.buildRegistry).toBe('function');
-    expect(typeof query.decorateRegistryMutations).toBe('function');
-    expect(query.QUERY_MUTATION_COMMANDS).toBeInstanceOf(Set);
+    expect(query.createRegistry).toBe(assembly.createRegistry);
+    expect(query.buildRegistry).toBe(assembly.buildRegistry);
+    expect(query.decorateRegistryMutations).toBe(assembly.decorateRegistryMutations);
+    expect(query.QUERY_MUTATION_COMMANDS).toBe(assembly.QUERY_MUTATION_COMMANDS);
   });
 
   it('re-exports shared query helpers', () => {
-    expect(typeof query.extractField).toBe('function');
-    expect(typeof query.normalizeQueryCommand).toBe('function');
+    expect(query.extractField).toBe(registry.extractField);
+    expect(query.normalizeQueryCommand).toBe(normalize.normalizeQueryCommand);
   });
 });

@@ -9,9 +9,11 @@
 
 const { test, describe, beforeEach, afterEach } = require('node:test');
 const assert = require('node:assert/strict');
+const childProcess = require('child_process');
 const fs = require('fs');
 const path = require('path');
-const { runGsdTools, createTempProject, cleanup } = require('./helpers.cjs');
+const { runGsdTools, createTempDir, createTempProject, cleanup } = require('./helpers.cjs');
+const { atomicWriteFileSync, loadConfig } = require('../get-shit-done/bin/lib/core.cjs');
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
@@ -24,6 +26,571 @@ function writeConfig(tmpDir, obj) {
   const configPath = path.join(tmpDir, '.planning', 'config.json');
   fs.writeFileSync(configPath, JSON.stringify(obj, null, 2), 'utf-8');
 }
+
+const INVALID_SECURITY_VALUES = [
+  ['security_enforcement', 0],
+  ['security_asvs_level', 0],
+  ['security_block_on', 'none'],
+];
+
+const CONFIG_MUTATION_COMMANDS = [
+  ['config-set', ['config-set', 'model_profile', 'quality']],
+  ['config-set-model-profile', ['config-set-model-profile', 'quality']],
+  ['config-new-project', ['config-new-project', '{}']],
+  ['config-ensure-section', ['config-ensure-section']],
+];
+
+const CJS_VALUE_DOMAIN_CASES = [
+  ['model_profile', 'turbo'],
+  ['workflow.drift_action', 'block'],
+  ['workflow.drift_threshold', 0],
+  ['workflow.drift_threshold', 1.5],
+  ['workflow.post_planning_gaps', 'yes'],
+];
+
+function setupPlanningRootRedirect(tmpDir, outsideDir) {
+  const planningPath = path.join(tmpDir, '.planning');
+  const outsideConfigPath = path.join(outsideDir, 'config.json');
+  const sentinel = '{"model_profile":"balanced","sentinel":true}\n';
+
+  fs.rmSync(planningPath, { recursive: true, force: true });
+  fs.writeFileSync(outsideConfigPath, sentinel, 'utf-8');
+  fs.symlinkSync(outsideDir, planningPath, 'dir');
+
+  return { outsideConfigPath, sentinel };
+}
+
+function assertRejectsWorkstreamRedirect(tmpDir, redirectDir, command) {
+  const workstreamName = 'linked-workstream';
+  const workstreamsDir = path.join(tmpDir, '.planning', 'workstreams');
+  const redirectedConfigPath = path.join(redirectDir, 'config.json');
+  const sentinel = '{"sentinel":true}\n';
+  const env = {
+    GSD_PROJECT: '',
+    GSD_WORKSTREAM: workstreamName,
+    HOME: tmpDir,
+    USERPROFILE: tmpDir,
+  };
+
+  fs.mkdirSync(workstreamsDir, { recursive: true });
+  fs.symlinkSync(redirectDir, path.join(workstreamsDir, workstreamName), 'dir');
+
+  const createResult = runGsdTools(command, tmpDir, env);
+  assert.strictEqual(createResult.success, false, createResult.error);
+  assert.match(createResult.error, /Invalid workstream config path/);
+  assert.strictEqual(fs.existsSync(redirectedConfigPath), false);
+
+  fs.writeFileSync(redirectedConfigPath, sentinel, 'utf-8');
+  const updateResult = runGsdTools(command, tmpDir, env);
+  assert.strictEqual(updateResult.success, false, updateResult.error);
+  assert.match(updateResult.error, /Invalid workstream config path/);
+  assert.strictEqual(fs.readFileSync(redirectedConfigPath, 'utf-8'), sentinel);
+}
+
+function assertRejectsConfigLeafRedirect(tmpDir, configPath, env, sentinel) {
+  const outsideDir = createTempDir('gsd-config-leaf-outside-');
+  const victimPath = path.join(outsideDir, 'victim.json');
+  const originalReadFileSync = fs.readFileSync;
+  const originalWriteFileSync = fs.writeFileSync;
+  const savedProject = process.env.GSD_PROJECT;
+  const savedWorkstream = process.env.GSD_WORKSTREAM;
+  let readAttempts = 0;
+  let writeAttempts = 0;
+  let thrown;
+
+  try {
+    fs.mkdirSync(path.dirname(configPath), { recursive: true });
+    fs.writeFileSync(victimPath, sentinel, 'utf-8');
+    fs.symlinkSync(victimPath, configPath, 'file');
+    const canonicalConfigPath = path.join(
+      fs.realpathSync(path.dirname(configPath)),
+      path.basename(configPath)
+    );
+
+    process.env.GSD_PROJECT = env.GSD_PROJECT || '';
+    process.env.GSD_WORKSTREAM = env.GSD_WORKSTREAM || '';
+    fs.readFileSync = (filePath, ...args) => {
+      if (filePath === canonicalConfigPath) readAttempts += 1;
+      return originalReadFileSync(filePath, ...args);
+    };
+    fs.writeFileSync = (filePath, ...args) => {
+      if (filePath === canonicalConfigPath) writeAttempts += 1;
+      return originalWriteFileSync(filePath, ...args);
+    };
+
+    try {
+      loadConfig(tmpDir);
+    } catch (err) {
+      thrown = err;
+    }
+  } finally {
+    fs.readFileSync = originalReadFileSync;
+    fs.writeFileSync = originalWriteFileSync;
+    if (savedProject === undefined) delete process.env.GSD_PROJECT;
+    else process.env.GSD_PROJECT = savedProject;
+    if (savedWorkstream === undefined) delete process.env.GSD_WORKSTREAM;
+    else process.env.GSD_WORKSTREAM = savedWorkstream;
+  }
+
+  try {
+    assert.deepStrictEqual(
+      {
+        rejected: thrown instanceof Error,
+        rejectedUnsafePath: /outside (the )?project|symlink/i.test(thrown?.message || ''),
+        readAttempts,
+        writeAttempts,
+        victim: fs.readFileSync(victimPath, 'utf-8'),
+      },
+      {
+        rejected: true,
+        rejectedUnsafePath: true,
+        readAttempts: 0,
+        writeAttempts: 0,
+        victim: sentinel,
+      }
+    );
+  } finally {
+    cleanup(outsideDir);
+  }
+}
+
+describe('CJS config workstream mutation security', () => {
+  let tmpDir;
+
+  beforeEach(() => {
+    tmpDir = createTempProject();
+  });
+
+  afterEach(() => {
+    cleanup(tmpDir);
+  });
+
+  test('preserves project-scoped workstream mutation with GSD_PROJECT and GSD_WORKSTREAM', () => {
+    const projectName = 'project-a';
+    const workstreamName = 'stream-a';
+    const projectConfigPath = path.join(tmpDir, '.planning', projectName, 'config.json');
+    const workstreamConfigPath = path.join(
+      tmpDir,
+      '.planning',
+      projectName,
+      'workstreams',
+      workstreamName,
+      'config.json'
+    );
+
+    fs.mkdirSync(path.dirname(workstreamConfigPath), { recursive: true });
+    fs.writeFileSync(projectConfigPath, '{"model_profile":"balanced"}\n', 'utf-8');
+    fs.writeFileSync(workstreamConfigPath, '{"model_profile":"balanced"}\n', 'utf-8');
+
+    const result = runGsdTools(
+      ['config-set', 'model_profile', 'quality'],
+      tmpDir,
+      { GSD_PROJECT: projectName, GSD_WORKSTREAM: workstreamName }
+    );
+
+    assert.ok(result.success, result.error);
+    assert.strictEqual(JSON.parse(fs.readFileSync(projectConfigPath, 'utf-8')).model_profile, 'balanced');
+    assert.strictEqual(JSON.parse(fs.readFileSync(workstreamConfigPath, 'utf-8')).model_profile, 'quality');
+    assert.strictEqual(
+      fs.existsSync(path.join(tmpDir, '.planning', 'workstreams', workstreamName, 'config.json')),
+      false
+    );
+  });
+
+  for (const [name, command] of CONFIG_MUTATION_COMMANDS) {
+    test(`${name} rejects an outside workstream symlink before redirected config writes`, () => {
+      const outsideDir = createTempDir('gsd-config-outside-');
+      try {
+        assertRejectsWorkstreamRedirect(tmpDir, outsideDir, command);
+      } finally {
+        cleanup(outsideDir);
+      }
+    });
+  }
+
+  test('rejects an in-project workstream redirect outside the canonical workstream tree', () => {
+    const redirectDir = path.join(tmpDir, '.planning', 'redirected-workstream');
+    fs.mkdirSync(redirectDir, { recursive: true });
+
+    assertRejectsWorkstreamRedirect(
+      tmpDir,
+      redirectDir,
+      ['config-set', 'model_profile', 'quality']
+    );
+  });
+});
+
+describe('CJS config root planning symlink security', () => {
+  let tmpDir;
+
+  beforeEach(() => {
+    tmpDir = createTempProject();
+  });
+
+  afterEach(() => {
+    cleanup(tmpDir);
+  });
+
+  test('loadConfig rejects a root .planning symlink outside the project without mutation', () => {
+    const outsideDir = createTempDir('gsd-config-outside-');
+    try {
+      const { outsideConfigPath, sentinel } = setupPlanningRootRedirect(tmpDir, outsideDir);
+
+      assert.throws(() => loadConfig(tmpDir), /outside the project/);
+      assert.strictEqual(fs.readFileSync(outsideConfigPath, 'utf-8'), sentinel);
+    } finally {
+      cleanup(outsideDir);
+    }
+  });
+
+  for (const [name, command] of CONFIG_MUTATION_COMMANDS) {
+    test(`${name} rejects a root .planning symlink outside the project`, () => {
+      const outsideDir = createTempDir('gsd-config-outside-');
+      try {
+        const { outsideConfigPath, sentinel } = setupPlanningRootRedirect(tmpDir, outsideDir);
+        const result = runGsdTools(command, tmpDir, { HOME: tmpDir, USERPROFILE: tmpDir });
+
+        assert.strictEqual(fs.readFileSync(outsideConfigPath, 'utf-8'), sentinel);
+        assert.strictEqual(result.success, false, result.error);
+      } finally {
+        cleanup(outsideDir);
+      }
+    });
+  }
+
+  test('config-get rejects a root .planning symlink outside the project', () => {
+    const outsideDir = createTempDir('gsd-config-outside-');
+    try {
+      const { outsideConfigPath, sentinel } = setupPlanningRootRedirect(tmpDir, outsideDir);
+      const result = runGsdTools(['config-get', 'model_profile'], tmpDir);
+
+      assert.strictEqual(fs.readFileSync(outsideConfigPath, 'utf-8'), sentinel);
+      assert.strictEqual(result.success, false, result.error);
+    } finally {
+      cleanup(outsideDir);
+    }
+  });
+
+  test('config-path rejects a root .planning symlink outside the project', () => {
+    const outsideDir = createTempDir('gsd-config-outside-');
+    try {
+      const { outsideConfigPath, sentinel } = setupPlanningRootRedirect(tmpDir, outsideDir);
+      const result = runGsdTools('config-path', tmpDir);
+
+      assert.strictEqual(fs.readFileSync(outsideConfigPath, 'utf-8'), sentinel);
+      assert.strictEqual(result.success, false, result.error);
+    } finally {
+      cleanup(outsideDir);
+    }
+  });
+});
+
+describe('loadConfig config.json symlink leaf security', { concurrency: false }, () => {
+  let tmpDir;
+
+  beforeEach(() => {
+    tmpDir = createTempProject();
+  });
+
+  afterEach(() => {
+    cleanup(tmpDir);
+  });
+
+  for (const { scope, relativePath, env, sentinel } of [
+    {
+      scope: 'root',
+      relativePath: ['.planning', 'config.json'],
+      env: {},
+      sentinel: '{"depth":"quick"}\n',
+    },
+    {
+      scope: 'project',
+      relativePath: ['.planning', 'project-a', 'config.json'],
+      env: { GSD_PROJECT: 'project-a' },
+      sentinel: '{"model_profile":"quality"}\n',
+    },
+    {
+      scope: 'workstream',
+      relativePath: ['.planning', 'project-a', 'workstreams', 'stream-a', 'config.json'],
+      env: { GSD_PROJECT: 'project-a', GSD_WORKSTREAM: 'stream-a' },
+      sentinel: '{"model_profile":"quality"}\n',
+    },
+  ]) {
+    test(`rejects an external ${scope} config.json symlink leaf before read or write`, () => {
+      assertRejectsConfigLeafRedirect(
+        tmpDir,
+        path.join(tmpDir, ...relativePath),
+        env,
+        sentinel
+      );
+    });
+  }
+});
+
+describe('atomicWriteFileSync symlink safety', { concurrency: false }, () => {
+  test('rejects a pre-planted predictable temporary-file symlink', () => {
+    const tmpDir = createTempDir('gsd-atomic-write-');
+    try {
+      const targetPath = path.join(tmpDir, 'target.json');
+      const victimPath = path.join(tmpDir, 'victim.txt');
+      const attackerTmpPath = `${targetPath}.tmp.${process.pid}`;
+      const sentinel = 'do not overwrite\n';
+      fs.writeFileSync(victimPath, sentinel, 'utf-8');
+      fs.symlinkSync(victimPath, attackerTmpPath, 'file');
+
+      let thrown;
+      try {
+        atomicWriteFileSync(targetPath, 'attacker content\n');
+      } catch (err) {
+        thrown = err;
+      }
+
+      const attackerSymlinkRemains = (() => {
+        try { return fs.lstatSync(attackerTmpPath).isSymbolicLink(); } catch { return false; }
+      })();
+      assert.deepStrictEqual(
+        {
+          threw: thrown instanceof Error,
+          victim: fs.readFileSync(victimPath, 'utf-8'),
+          targetExists: fs.existsSync(targetPath),
+          attackerSymlinkRemains,
+        },
+        {
+          threw: true,
+          victim: sentinel,
+          targetExists: false,
+          attackerSymlinkRemains: true,
+        }
+      );
+    } finally {
+      cleanup(tmpDir);
+    }
+  });
+
+  test('renames from a non-predictable temporary source', () => {
+    const tmpDir = createTempDir('gsd-atomic-write-');
+    const targetPath = path.join(tmpDir, 'target.json');
+    const predictableTmpPath = `${targetPath}.tmp.${process.pid}`;
+    const renameSourcePath = path.join(tmpDir, 'rename-source.txt');
+    const originalSpawnSync = childProcess.spawnSync;
+
+    try {
+      childProcess.spawnSync = (command, args, options) => {
+        const childArgs = [...args];
+        childArgs[1] = [
+          "const testFs = require('fs');",
+          'const testRenameSync = testFs.renameSync;',
+          'testFs.renameSync = (sourcePath, destinationPath) => {',
+          `  testFs.writeFileSync(${JSON.stringify(renameSourcePath)}, sourcePath, 'utf8');`,
+          '  return testRenameSync(sourcePath, destinationPath);',
+          '};',
+          childArgs[1],
+        ].join('\n');
+        return originalSpawnSync(command, childArgs, options);
+      };
+
+      atomicWriteFileSync(targetPath, 'safe content\n');
+
+      const renameSource = fs.readFileSync(renameSourcePath, 'utf8');
+      assert.notStrictEqual(renameSource, path.basename(predictableTmpPath));
+      assert.match(renameSource, /^target\.json\.tmp\.\d+\.[0-9a-f]{32}$/);
+      assert.strictEqual(fs.readFileSync(targetPath, 'utf-8'), 'safe content\n');
+    } finally {
+      childProcess.spawnSync = originalSpawnSync;
+      cleanup(tmpDir);
+    }
+  });
+
+  test('does not redirect a config write when its parent is swapped for an external symlink', { concurrency: false }, () => {
+    const tmpDir = createTempDir('gsd-atomic-write-');
+    const outsideDir = createTempDir('gsd-atomic-outside-');
+    const configParentPath = path.join(tmpDir, '.planning', 'project-a');
+    const movedParentPath = `${configParentPath}.before-swap`;
+    const configPath = path.join(configParentPath, 'config.json');
+    const outsideConfigPath = path.join(outsideDir, 'config.json');
+    const originalConfig = '{"model_profile":"balanced"}\n';
+    const sentinel = '{"sentinel":"external"}\n';
+    const replacement = '{"model_profile":"quality"}\n';
+    const originalCwd = process.cwd();
+    const originalSpawnSync = childProcess.spawnSync;
+    let swapped = false;
+    let thrown;
+
+    try {
+      fs.mkdirSync(configParentPath, { recursive: true });
+      fs.writeFileSync(configPath, originalConfig, 'utf-8');
+      fs.writeFileSync(outsideConfigPath, sentinel, 'utf-8');
+      childProcess.spawnSync = (command, args, options) => {
+        if (!swapped) {
+          fs.renameSync(configParentPath, movedParentPath);
+          fs.symlinkSync(outsideDir, configParentPath, 'dir');
+          swapped = true;
+        }
+        return originalSpawnSync(command, args, options);
+      };
+
+      try {
+        atomicWriteFileSync(configPath, replacement);
+      } catch (err) {
+        thrown = err;
+      }
+    } finally {
+      childProcess.spawnSync = originalSpawnSync;
+    }
+
+    try {
+      assert.strictEqual(swapped, true, 'test setup must swap the config parent at the spawn boundary');
+      assert.strictEqual(thrown instanceof Error, true, 'atomic write must reject the replaced parent');
+      assert.strictEqual(process.cwd(), originalCwd, 'atomic write must not change the parent process cwd');
+      assert.strictEqual(fs.readFileSync(outsideConfigPath, 'utf-8'), sentinel);
+      assert.deepStrictEqual(fs.readdirSync(outsideDir).sort(), ['config.json']);
+      assert.strictEqual(fs.readFileSync(path.join(movedParentPath, 'config.json'), 'utf-8'), originalConfig);
+    } finally {
+      cleanup(tmpDir);
+      cleanup(outsideDir);
+    }
+  });
+
+  test('rejects a rename-boundary temporary source swap', () => {
+    const tmpDir = createTempDir('gsd-atomic-write-');
+    const outsideDir = createTempDir('gsd-atomic-victim-');
+    const targetPath = path.join(tmpDir, 'target.json');
+    const victimPath = path.join(outsideDir, 'victim.txt');
+    const swapMarkerPath = path.join(outsideDir, 'swap-marker');
+    const safeOriginal = 'safe original\n';
+    const victimSentinel = 'external victim unchanged\n';
+    const originalSpawnSync = childProcess.spawnSync;
+    let thrown;
+
+    try {
+      fs.writeFileSync(targetPath, safeOriginal, 'utf-8');
+      fs.writeFileSync(victimPath, victimSentinel, 'utf-8');
+      childProcess.spawnSync = (command, args, options) => {
+        const childArgs = [...args];
+        childArgs[1] = [
+          "const testFs = require('fs');",
+          'const testCloseSync = testFs.closeSync;',
+          'let testSwapped = false;',
+          'testFs.closeSync = (fd) => {',
+          '  testCloseSync(fd);',
+          '  if (testSwapped) return;',
+          `  const tempName = testFs.readdirSync('.').find((entry) => entry.startsWith(${JSON.stringify(`${path.basename(targetPath)}.tmp.`)}));`,
+          '  if (!tempName) return;',
+          '  testFs.unlinkSync(tempName);',
+          `  testFs.symlinkSync(${JSON.stringify(victimPath)}, tempName, 'file');`,
+          '  testSwapped = true;',
+          `  testFs.writeFileSync(${JSON.stringify(swapMarkerPath)}, 'swapped');`,
+          '};',
+          childArgs[1],
+        ].join('\n');
+        return originalSpawnSync(command, childArgs, options);
+      };
+
+      try {
+        atomicWriteFileSync(targetPath, 'trusted replacement\n');
+      } catch (err) {
+        thrown = err;
+      }
+    } finally {
+      childProcess.spawnSync = originalSpawnSync;
+    }
+
+    try {
+      assert.deepStrictEqual(
+        {
+          swapped: fs.existsSync(swapMarkerPath),
+          rejected: thrown instanceof Error,
+          targetIsSymlink: fs.lstatSync(targetPath).isSymbolicLink(),
+          target: fs.readFileSync(targetPath, 'utf-8'),
+          victim: fs.readFileSync(victimPath, 'utf-8'),
+        },
+        {
+          swapped: true,
+          rejected: true,
+          targetIsSymlink: false,
+          target: safeOriginal,
+          victim: victimSentinel,
+        }
+      );
+    } finally {
+      cleanup(tmpDir);
+      cleanup(outsideDir);
+    }
+  });
+});
+
+describe('CJS config project and workstream path regressions', () => {
+  let tmpDir;
+
+  beforeEach(() => {
+    tmpDir = createTempProject();
+  });
+
+  afterEach(() => {
+    cleanup(tmpDir);
+  });
+
+  test('config-path and config-set stay scoped to GSD_PROJECT without a workstream', () => {
+    const projectName = 'project-a';
+    const rootConfigPath = path.join(tmpDir, '.planning', 'config.json');
+    const projectConfigPath = path.join(tmpDir, '.planning', projectName, 'config.json');
+    const rootSentinel = '{"model_profile":"balanced","root":true}\n';
+    const projectSentinel = '{"model_profile":"balanced","project":true}\n';
+    const env = { GSD_PROJECT: projectName, GSD_WORKSTREAM: '', HOME: tmpDir, USERPROFILE: tmpDir };
+
+    fs.mkdirSync(path.dirname(projectConfigPath), { recursive: true });
+    fs.writeFileSync(rootConfigPath, rootSentinel, 'utf-8');
+    fs.writeFileSync(projectConfigPath, projectSentinel, 'utf-8');
+
+    const pathResult = runGsdTools('config-path', tmpDir, env);
+    assert.ok(pathResult.success, pathResult.error);
+    assert.strictEqual(
+      pathResult.output.trim(),
+      path.join(fs.realpathSync(path.dirname(projectConfigPath)), 'config.json')
+    );
+
+    const setResult = runGsdTools(['config-set', 'model_profile', 'quality'], tmpDir, env);
+    assert.ok(setResult.success, setResult.error);
+    assert.strictEqual(fs.readFileSync(rootConfigPath, 'utf-8'), rootSentinel);
+    assert.strictEqual(JSON.parse(fs.readFileSync(projectConfigPath, 'utf-8')).model_profile, 'quality');
+  });
+
+  test('loadConfig rejects an external workstream symlink before migration writes', () => {
+    const outsideDir = createTempDir('gsd-config-outside-');
+    const projectName = 'project-a';
+    const workstreamName = 'linked-workstream';
+    const workstreamPath = path.join(tmpDir, '.planning', projectName, 'workstreams', workstreamName);
+    const outsideConfigPath = path.join(outsideDir, 'config.json');
+    const outsideSentinel = '{"depth":"quick","sentinel":"outside"}\n';
+    const savedProject = process.env.GSD_PROJECT;
+    const savedWorkstream = process.env.GSD_WORKSTREAM;
+
+    try {
+      fs.mkdirSync(path.dirname(workstreamPath), { recursive: true });
+      fs.writeFileSync(outsideConfigPath, outsideSentinel, 'utf-8');
+      fs.symlinkSync(outsideDir, workstreamPath, 'dir');
+      process.env.GSD_PROJECT = projectName;
+      process.env.GSD_WORKSTREAM = workstreamName;
+
+      let thrown;
+      try {
+        loadConfig(tmpDir);
+      } catch (err) {
+        thrown = err;
+      }
+
+      assert.ok(thrown instanceof Error, 'loadConfig must reject an external workstream path');
+      assert.match(thrown.message, /outside (the )?project/);
+      assert.strictEqual(fs.readFileSync(outsideConfigPath, 'utf-8'), outsideSentinel);
+    } finally {
+      if (savedProject === undefined) delete process.env.GSD_PROJECT;
+      else process.env.GSD_PROJECT = savedProject;
+      if (savedWorkstream === undefined) delete process.env.GSD_WORKSTREAM;
+      else process.env.GSD_WORKSTREAM = savedWorkstream;
+      cleanup(outsideDir);
+    }
+  });
+});
 
 // ─── config-ensure-section ───────────────────────────────────────────────────
 
@@ -184,13 +751,26 @@ describe('config-set command', () => {
     assert.strictEqual(typeof config.granularity, 'number');
   });
 
-  test('preserves plain strings', () => {
-    const result = runGsdTools('config-set model_profile hello', tmpDir);
-    assert.ok(result.success, `Command failed: ${result.error}`);
+  test('rejects constrained value domains without mutation', () => {
+    for (const [key, invalidValue] of CJS_VALUE_DOMAIN_CASES) {
+      const before = readConfig(tmpDir);
+      const result = runGsdTools(['config-set', key, String(invalidValue)], tmpDir);
 
-    const config = readConfig(tmpDir);
-    assert.strictEqual(config.model_profile, 'hello');
-    assert.strictEqual(typeof config.model_profile, 'string');
+      assert.strictEqual(result.success, false, `${key}=${invalidValue} must be rejected`);
+      assert.deepStrictEqual(readConfig(tmpDir), before, `${key}=${invalidValue} must not mutate config.json`);
+    }
+  });
+
+  test('accepts representative constrained values', () => {
+    for (const [key, value] of [
+      ['model_profile', 'quality'],
+      ['workflow.drift_action', 'warn'],
+      ['workflow.drift_threshold', '1'],
+      ['workflow.post_planning_gaps', 'false'],
+    ]) {
+      const result = runGsdTools(['config-set', key, value], tmpDir);
+      assert.ok(result.success, `${key}=${value} failed: ${result.error}`);
+    }
   });
 
   test('sets nested values via dot-notation', () => {
@@ -262,9 +842,49 @@ describe('config-set command', () => {
     assert.strictEqual(config.intel.enabled, true);
   });
 
+  for (const [key, invalidValue] of INVALID_SECURITY_VALUES) {
+    test(`CJS config security rejects workflow.${key}=${invalidValue} without mutation`, () => {
+      const before = readConfig(tmpDir);
+      const result = runGsdTools(['config-set', `workflow.${key}`, String(invalidValue)], tmpDir);
+
+      assert.strictEqual(result.success, false, `workflow.${key}=${invalidValue} must be rejected`);
+      assert.ok(result.error.includes(`Invalid workflow.${key}`), result.error);
+      assert.deepStrictEqual(readConfig(tmpDir), before);
+    });
+  }
+
+  test('CJS config security accepts representative valid values', () => {
+    for (const [key, value] of [
+      ['security_enforcement', 'false'],
+      ['security_asvs_level', '2'],
+      ['security_block_on', 'medium'],
+    ]) {
+      const result = runGsdTools(['config-set', `workflow.${key}`, value], tmpDir);
+      assert.ok(result.success, `workflow.${key}=${value} failed: ${result.error}`);
+    }
+
+    const config = readConfig(tmpDir);
+    assert.strictEqual(config.workflow.security_enforcement, false);
+    assert.strictEqual(config.workflow.security_asvs_level, 2);
+    assert.strictEqual(config.workflow.security_block_on, 'medium');
+  });
+
   test('errors when no key path provided', () => {
     const result = runGsdTools('config-set', tmpDir);
     assert.strictEqual(result.success, false);
+  });
+
+  test('rejects missing value without mutating model_profile', () => {
+    const before = readConfig(tmpDir);
+    const result = runGsdTools('config-set model_profile', tmpDir);
+
+    assert.strictEqual(result.success, false);
+    assert.match(result.error, /Usage: config-set <key\.path> <value>/);
+
+    const after = readConfig(tmpDir);
+    assert.strictEqual(after.model_profile, before.model_profile);
+    assert.ok('model_profile' in after);
+    assert.deepStrictEqual(after, before);
   });
 
   test('rejects known invalid nyquist alias keys with a suggestion', () => {
@@ -276,6 +896,25 @@ describe('config-set command', () => {
     const config = readConfig(tmpDir);
     assert.strictEqual(config.workflow.nyquist_validation_enabled, undefined);
     assert.strictEqual(config.workflow.nyquist_validation, true);
+  });
+
+  test('rejects prototype-reserved segments in dynamic key paths', () => {
+    const reservedPaths = [
+      'model_profile_overrides.__proto__.opus',
+      'model_profile_overrides.prototype.sonnet',
+      'model_profile_overrides.constructor.haiku',
+      'model_overrides.__proto__',
+      'model_overrides.prototype',
+      'model_overrides.constructor',
+    ];
+
+    for (const keyPath of reservedPaths) {
+      writeConfig(tmpDir, {});
+      const result = runGsdTools(['config-set', keyPath, 'owned'], tmpDir);
+      assert.strictEqual(result.success, false, `${keyPath} must be rejected`);
+      assert.match(result.error, /Unknown config key/);
+      assert.deepStrictEqual(readConfig(tmpDir), {}, `${keyPath} must not mutate config.json`);
+    }
   });
 });
 
@@ -326,6 +965,16 @@ describe('config-get command', () => {
       result.error.includes('Key not found'),
       `Expected "Key not found" in error: ${result.error}`
     );
+  });
+
+  test('rejects prototype-reserved key path segments', () => {
+    writeConfig(tmpDir, {});
+
+    for (const keyPath of ['__proto__', 'constructor', 'constructor.prototype']) {
+      const result = runGsdTools(['config-get', keyPath], tmpDir);
+      assert.strictEqual(result.success, false, `${keyPath} must be rejected`);
+      assert.match(result.error, /Key not found/);
+    }
   });
 
   describe('when config.json does not exist', () => {
@@ -532,6 +1181,110 @@ describe('config-new-project command', () => {
     const out = JSON.parse(result.output);
     assert.strictEqual(out.created, true);
     assert.strictEqual(out.path, '.planning/config.json');
+  });
+
+  test('rejects constrained domains from choices and defaults before creation', () => {
+    for (const [source, key, invalidValue] of ['choices', 'defaults'].flatMap((source) =>
+      CJS_VALUE_DOMAIN_CASES.map(([key, value]) => [source, key, value])
+    )) {
+      const attemptDir = createTempProject('gsd-config-domain-');
+      try {
+        if (source === 'defaults') {
+          const defaultsDir = path.join(attemptDir, '.gsd');
+          fs.mkdirSync(defaultsDir, { recursive: true });
+          fs.writeFileSync(
+            path.join(defaultsDir, 'defaults.json'),
+            JSON.stringify({ [key.split('.')[0]]: key.includes('.') ? { [key.split('.')[1]]: invalidValue } : invalidValue }),
+            'utf-8'
+          );
+        }
+
+        const choices = source === 'choices'
+          ? JSON.stringify({ [key.split('.')[0]]: key.includes('.') ? { [key.split('.')[1]]: invalidValue } : invalidValue })
+          : '{}';
+        const result = runGsdTools(
+          ['config-new-project', choices],
+          attemptDir,
+          { HOME: attemptDir, USERPROFILE: attemptDir }
+        );
+
+        assert.strictEqual(result.success, false, `${source} ${key}=${invalidValue} must be rejected`);
+        assert.strictEqual(fs.existsSync(path.join(attemptDir, '.planning', 'config.json')), false);
+      } finally {
+        cleanup(attemptDir);
+      }
+    }
+  });
+
+  for (const [key, invalidValue] of INVALID_SECURITY_VALUES) {
+    test(`CJS config security rejects bulk choice workflow.${key}=${invalidValue} before config creation`, () => {
+      const choices = JSON.stringify({ workflow: { [key]: invalidValue } });
+      const result = runGsdTools(
+        ['config-new-project', choices],
+        tmpDir,
+        { HOME: tmpDir, USERPROFILE: tmpDir }
+      );
+
+      assert.strictEqual(result.success, false, `workflow.${key}=${invalidValue} must be rejected`);
+      assert.ok(result.error.includes(`Invalid workflow.${key}`), result.error);
+      assert.strictEqual(fs.existsSync(path.join(tmpDir, '.planning', 'config.json')), false);
+    });
+
+    test(`CJS config security rejects default workflow.${key}=${invalidValue} before config creation`, () => {
+      const gsdDir = path.join(tmpDir, '.gsd');
+      fs.mkdirSync(gsdDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(gsdDir, 'defaults.json'),
+        JSON.stringify({ workflow: { [key]: invalidValue } }),
+        'utf-8'
+      );
+
+      const result = runGsdTools(
+        ['config-new-project', '{}'],
+        tmpDir,
+        { HOME: tmpDir, USERPROFILE: tmpDir }
+      );
+
+      assert.strictEqual(result.success, false, `workflow.${key}=${invalidValue} must be rejected`);
+      assert.ok(result.error.includes(`Invalid workflow.${key}`), result.error);
+      assert.strictEqual(fs.existsSync(path.join(tmpDir, '.planning', 'config.json')), false);
+    });
+  }
+
+  test('rejects prototype-reserved nested user choice keys', () => {
+    const choices = '{"model_profile_overrides":{"__proto__":{"opus":"owned"}}}';
+    const result = runGsdTools(['config-new-project', choices], tmpDir, { HOME: tmpDir, USERPROFILE: tmpDir });
+    assert.strictEqual(result.success, false);
+    assert.match(result.error, /Unknown config key/);
+    assert.strictEqual(fs.existsSync(path.join(tmpDir, '.planning', 'config.json')), false);
+  });
+
+  test('rejects invalid empty object dynamic branches in user choices', () => {
+    for (const choices of [
+      '{"model_overrides":{"bad/slash":{}}}',
+      '{"model_profile_overrides":{"__proto__":{}}}',
+      '{"model_profile_overrides":{"custom":{}}}',
+    ]) {
+      const result = runGsdTools(['config-new-project', choices], tmpDir, { HOME: tmpDir, USERPROFILE: tmpDir });
+      assert.strictEqual(result.success, false, `${choices} must be rejected`);
+      assert.match(result.error, /Unknown config key/);
+      assert.strictEqual(fs.existsSync(path.join(tmpDir, '.planning', 'config.json')), false);
+    }
+  });
+
+  test('rejects prototype-reserved dynamic keys from defaults.json', () => {
+    const gsdDir = path.join(tmpDir, '.gsd');
+    fs.mkdirSync(gsdDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(gsdDir, 'defaults.json'),
+      '{"model_profile_overrides":{"constructor":{"opus":"owned"}}}',
+      'utf-8'
+    );
+
+    const result = runGsdTools(['config-new-project', '{}'], tmpDir, { HOME: tmpDir, USERPROFILE: tmpDir });
+    assert.strictEqual(result.success, false);
+    assert.match(result.error, /Unknown config key/);
+    assert.strictEqual(fs.existsSync(path.join(tmpDir, '.planning', 'config.json')), false);
   });
 });
 

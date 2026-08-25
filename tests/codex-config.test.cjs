@@ -24,6 +24,7 @@ const { execFileSync } = require('child_process');
 // Build on demand so the test passes regardless of runner ordering.
 const HOOKS_DIST = path.join(__dirname, '..', 'hooks', 'dist');
 const BUILD_HOOKS_SCRIPT = path.join(__dirname, '..', 'scripts', 'build-hooks.js');
+const INSTALL_SRC = path.join(__dirname, '..', 'bin', 'install.js');
 before(() => {
   if (!fs.existsSync(HOOKS_DIST) || fs.readdirSync(HOOKS_DIST).length === 0) {
     execFileSync(process.execPath, [BUILD_HOOKS_SCRIPT], {
@@ -33,21 +34,47 @@ before(() => {
   }
 });
 
+const installModule = require('../bin/install.js');
 const {
   getCodexSkillAdapterHeader,
   convertClaudeAgentToCodexAgent,
   convertClaudeCommandToCodexSkill,
   buildHookCommand,
+  buildCodexHookBlock,
+  resolveNodeRunner,
   generateCodexAgentToml,
   generateCodexConfigBlock,
   stripGsdFromCodexConfig,
   migrateCodexHooksMapFormat,
+  stripStaleGsdHookBlocks,
   mergeCodexConfig,
   install,
   GSD_CODEX_MARKER,
   CODEX_AGENT_SANDBOX,
   parseTomlToObject,
-} = require('../bin/install.js');
+  rewriteLegacyCodexHookBlock,
+  validateCodexConfigSchema,
+} = installModule;
+
+function withExecPath(execPath, fn) {
+  const previousExecPath = process.execPath;
+  Object.defineProperty(process, 'execPath', {
+    value: execPath,
+    writable: true,
+    enumerable: true,
+    configurable: true,
+  });
+  try {
+    return fn();
+  } finally {
+    Object.defineProperty(process, 'execPath', {
+      value: previousExecPath,
+      writable: true,
+      enumerable: true,
+      configurable: true,
+    });
+  }
+}
 
 function runCodexInstall(codexHome, cwd = path.join(__dirname, '..')) {
   const previousCodeHome = process.env.CODEX_HOME;
@@ -1420,6 +1447,183 @@ describe('Codex install hook configuration (e2e)', () => {
     );
   });
 
+  test('Codex hooks are manifest-owned and legacy-untracked modifications are backed up before replacement', () => {
+    runCodexInstall(codexHome);
+
+    const hookRelPath = 'hooks/gsd-check-update.js';
+    const hookFile = path.join(codexHome, hookRelPath);
+    const manifestPath = path.join(codexHome, 'gsd-file-manifest.json');
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+    assert.ok(manifest.files[hookRelPath], 'successful install must own the Codex hook in the manifest');
+
+    // Simulate an update from a legacy release whose manifest excluded Codex hooks.
+    delete manifest.files[hookRelPath];
+    fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
+    fs.writeFileSync(hookFile, '// user-modified Codex hook\n');
+
+    runCodexInstall(codexHome);
+
+    assert.equal(
+      fs.readFileSync(path.join(codexHome, 'gsd-local-patches', hookRelPath), 'utf8'),
+      '// user-modified Codex hook\n',
+      'an untracked legacy Codex hook must be backed up before install replaces it'
+    );
+    assert.notEqual(fs.readFileSync(hookFile, 'utf8'), '// user-modified Codex hook\n');
+  });
+
+  test('minimal Codex install still publishes its manifest before skipping hook setup', () => {
+    execFileSync(
+      process.execPath,
+      [INSTALL_SRC, '--codex', '--global', '--config-dir', codexHome, '--minimal'],
+      {
+        encoding: 'utf8',
+        env: { ...process.env, GSD_TEST_MODE: '' },
+        stdio: 'pipe',
+      }
+    );
+
+    const manifestPath = path.join(codexHome, 'gsd-file-manifest.json');
+    assert.equal(fs.existsSync(manifestPath), true, 'minimal Codex install must retain manifest ownership');
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+    assert.equal(manifest.mode, 'minimal');
+    assert.equal(Object.keys(manifest.files).some((file) => file.startsWith('hooks/')), false);
+  });
+
+  test('Codex validation failure restores pre-existing hooks and removes hooks created by the failed install', () => {
+    const hooksDir = path.join(codexHome, 'hooks');
+    const existingHook = path.join(hooksDir, 'gsd-check-update.js');
+    const newlyInstalledHook = path.join(hooksDir, 'gsd-context-monitor.js');
+    fs.mkdirSync(hooksDir, { recursive: true });
+    fs.writeFileSync(existingHook, '// pre-install hook bytes\n');
+
+    installModule.__codexSchemaValidator = () => ({
+      ok: false,
+      reason: 'simulated hook rollback failure',
+    });
+    try {
+      assert.throws(
+        () => runCodexInstall(codexHome),
+        /post-write Codex schema validation failed/
+      );
+    } finally {
+      delete installModule.__codexSchemaValidator;
+    }
+
+    assert.equal(fs.readFileSync(existingHook, 'utf8'), '// pre-install hook bytes\n');
+    assert.equal(
+      fs.existsSync(newlyInstalledHook),
+      false,
+      'rollback must remove GSD hooks that did not exist before the failed install'
+    );
+  });
+
+  test('Codex validation failure restores the complete pre-install get-shit-done tree', () => {
+    const gsdDir = path.join(codexHome, 'get-shit-done');
+    fs.mkdirSync(path.join(gsdDir, 'bin'), { recursive: true });
+    fs.writeFileSync(path.join(gsdDir, 'VERSION'), 'pre-install-version\n');
+    fs.writeFileSync(path.join(gsdDir, 'legacy-managed.md'), 'pre-install root bytes\n');
+    fs.writeFileSync(path.join(gsdDir, 'bin', 'legacy-managed.cjs'), 'pre-install nested bytes\n');
+    fs.chmodSync(path.join(gsdDir, 'bin', 'legacy-managed.cjs'), 0o755);
+
+    installModule.__codexSchemaValidator = () => ({
+      ok: false,
+      reason: 'simulated managed-tree rollback failure',
+    });
+    try {
+      assert.throws(
+        () => runCodexInstall(codexHome),
+        /post-write Codex schema validation failed/
+      );
+    } finally {
+      delete installModule.__codexSchemaValidator;
+    }
+
+    assert.deepEqual(fs.readdirSync(gsdDir).sort(), ['VERSION', 'bin', 'legacy-managed.md']);
+    assert.deepEqual(fs.readdirSync(path.join(gsdDir, 'bin')), ['legacy-managed.cjs']);
+    assert.equal(fs.readFileSync(path.join(gsdDir, 'VERSION'), 'utf8'), 'pre-install-version\n');
+    assert.equal(fs.readFileSync(path.join(gsdDir, 'legacy-managed.md'), 'utf8'), 'pre-install root bytes\n');
+    assert.equal(fs.readFileSync(path.join(gsdDir, 'bin', 'legacy-managed.cjs'), 'utf8'), 'pre-install nested bytes\n');
+    assert.equal(fs.statSync(path.join(gsdDir, 'bin', 'legacy-managed.cjs')).mode & 0o777, 0o755);
+  });
+
+  test('minimal Codex validation failure restores managed files, config, and manifest', () => {
+    const skillFile = path.join(codexHome, 'skills', 'gsd-legacy', 'SKILL.md');
+    const agentMd = path.join(codexHome, 'agents', 'gsd-legacy.md');
+    const agentToml = path.join(codexHome, 'agents', 'gsd-legacy.toml');
+    const gsdFile = path.join(codexHome, 'get-shit-done', 'legacy-managed.md');
+    const configPath = path.join(codexHome, 'config.toml');
+    const manifestPath = path.join(codexHome, 'gsd-file-manifest.json');
+    const configBytes = '[agents.gsd-legacy]\ndescription = "legacy"\nconfig_file = "agents/gsd-legacy.toml"\n';
+    const manifestBytes = '{"version":"pre-install","files":{}}\n';
+
+    fs.mkdirSync(path.dirname(skillFile), { recursive: true });
+    fs.mkdirSync(path.dirname(agentMd), { recursive: true });
+    fs.mkdirSync(path.dirname(gsdFile), { recursive: true });
+    fs.writeFileSync(skillFile, 'pre-install skill bytes\n');
+    fs.writeFileSync(agentMd, 'pre-install agent markdown\n');
+    fs.writeFileSync(agentToml, 'pre-install agent toml\n');
+    fs.writeFileSync(gsdFile, 'pre-install managed tree bytes\n');
+    fs.writeFileSync(configPath, configBytes);
+    fs.writeFileSync(manifestPath, manifestBytes);
+
+    const childScript = `
+      process.env.GSD_TEST_MODE = '1';
+      const installModule = require(${JSON.stringify(INSTALL_SRC)});
+      installModule.__codexSchemaValidator = () => ({
+        ok: false,
+        reason: 'simulated minimal rollback failure',
+      });
+      installModule.install(true, 'codex');
+    `;
+    let failure = null;
+    try {
+      execFileSync(process.execPath, ['-e', childScript, '--', 'gsd-test', '--minimal'], {
+        encoding: 'utf8',
+        env: { ...process.env, CODEX_HOME: codexHome, GSD_TEST_MODE: '1' },
+        stdio: 'pipe',
+      });
+    } catch (error) {
+      failure = error;
+    }
+
+    assert.ok(failure, 'minimal install must abort when post-mutation schema validation fails');
+    assert.match(failure.stderr, /post-write Codex schema validation failed/);
+    assert.equal(fs.readFileSync(skillFile, 'utf8'), 'pre-install skill bytes\n');
+    assert.equal(fs.readFileSync(agentMd, 'utf8'), 'pre-install agent markdown\n');
+    assert.equal(fs.readFileSync(agentToml, 'utf8'), 'pre-install agent toml\n');
+    assert.equal(fs.readFileSync(gsdFile, 'utf8'), 'pre-install managed tree bytes\n');
+    assert.equal(fs.readFileSync(configPath, 'utf8'), configBytes);
+    assert.equal(fs.readFileSync(manifestPath, 'utf8'), manifestBytes);
+  });
+
+  test('Codex hook copy replaces a pre-existing hook symlink without overwriting its target', () => {
+    const hooksDir = path.join(codexHome, 'hooks');
+    const victimPath = path.join(tmpDir, 'victim.txt');
+    const hookFile = path.join(hooksDir, 'gsd-check-update.js');
+    fs.mkdirSync(hooksDir, { recursive: true });
+    fs.writeFileSync(victimPath, 'do not overwrite\n');
+    fs.symlinkSync(victimPath, hookFile);
+
+    runCodexInstall(codexHome);
+
+    assert.equal(fs.readFileSync(victimPath, 'utf8'), 'do not overwrite\n');
+    assert.equal(fs.lstatSync(hookFile).isSymbolicLink(), false, 'installed Codex hook must be a regular file, not the attacker symlink');
+    assert.match(fs.readFileSync(hookFile, 'utf8'), /gsd-check-update/);
+  });
+
+  test('Codex hook copy refuses a symlinked hooks directory', () => {
+    const externalHooksDir = path.join(tmpDir, 'external-hooks');
+    fs.mkdirSync(codexHome, { recursive: true });
+    fs.mkdirSync(externalHooksDir, { recursive: true });
+    fs.symlinkSync(externalHooksDir, path.join(codexHome, 'hooks'), 'dir');
+
+    assert.throws(
+      () => runCodexInstall(codexHome),
+      /Refusing to install hooks into symlinked directory/
+    );
+    assert.deepEqual(fs.readdirSync(externalHooksDir), [], 'installer must not write hooks through the symlinked directory');
+  });
+
   test('fresh CODEX_HOME enables codex_hooks without draft root defaults', () => {
     runCodexInstall(codexHome);
 
@@ -1465,6 +1669,210 @@ describe('Codex install hook configuration (e2e)', () => {
       !content.includes(`command = "node ${codexHome.replace(/\\/g, '/')}/hooks/gsd-check-update.js"`),
       'config.toml must not emit the hook path as a double-quoted shell argument'
     );
+  });
+
+  test('Codex hook TOML escapes control characters and rejects raw newlines in basic strings', () => {
+    codexHome = path.join(tmpDir, 'codex-home-line\nbreak-\rreturn-\u0001ctrl');
+    const block = buildCodexHookBlock(codexHome, {
+      absoluteRunner: "'/usr/local/bin/node'",
+      eol: '\n',
+    });
+    const commandLine = block.split('\n').find((line) => line.startsWith('command = '));
+
+    assert.ok(commandLine.includes('\\n'), 'escapes newline in emitted TOML string');
+    assert.ok(commandLine.includes('\\r'), 'escapes carriage return in emitted TOML string');
+    assert.ok(commandLine.includes('\\u0001'), 'escapes raw control character in emitted TOML string');
+    assert.ok(!commandLine.includes('\u0001'), 'does not emit raw control byte in command line');
+
+    const validation = validateCodexConfigSchema([
+      '[[hooks.SessionStart]]',
+      '',
+      '[[hooks.SessionStart.hooks]]',
+      'type = "command"',
+      'command = "node /tmp/raw',
+      'newline/hooks/gsd-check-update.js"',
+      '',
+    ].join('\n'));
+
+    assert.equal(validation.ok, false);
+    assert.match(validation.reason, /raw (newline|carriage return)|basic string/i);
+  });
+
+  test('Codex SessionStart hook registration ignores comments and custom commands mentioning gsd-check-update', () => {
+    writeCodexConfig(codexHome, [
+      '[features]',
+      'codex_hooks = true',
+      '',
+      '# user note: gsd-check-update is handled elsewhere',
+      '[[hooks.SessionStart]]',
+      '',
+      '[[hooks.SessionStart.hooks]]',
+      'type = "command"',
+      'command = "echo gsd-check-update"',
+      '',
+    ].join('\n'));
+
+    runCodexInstall(codexHome);
+
+    const content = readCodexConfig(codexHome);
+    const parsed = parseTomlToObject(content);
+    const commands = parsed.hooks.SessionStart.flatMap((entry) =>
+      Array.isArray(entry.hooks) ? entry.hooks.map((hook) => hook.command).filter(Boolean) : []
+    );
+    const expectedCommand = buildHookCommand(codexHome, 'gsd-check-update.js');
+    const managedCommands = commands.filter((command) => command === expectedCommand);
+
+    assert.ok(content.includes('# user note: gsd-check-update is handled elsewhere'), 'preserves user comment mentioning gsd-check-update');
+    assert.ok(commands.includes('echo gsd-check-update'), 'preserves user custom command mentioning gsd-check-update');
+    assert.strictEqual(
+      managedCommands.length,
+      1,
+      'installer must add exactly one real managed hooks/gsd-check-update.js command'
+    );
+  });
+
+  test('Codex reinstall recognizes an existing global portable managed hook', (t) => {
+    const fakeHome = path.join(tmpDir, 'fake-home');
+    const originalHomedir = os.homedir;
+    os.homedir = () => fakeHome;
+    t.after(() => {
+      os.homedir = originalHomedir;
+    });
+    codexHome = path.join(fakeHome, '.codex');
+    fs.mkdirSync(codexHome, { recursive: true });
+    const portableCommand = buildHookCommand(codexHome, 'gsd-check-update.js', {
+      portableHooks: true,
+    });
+    writeCodexConfig(codexHome, [
+      '[features]',
+      'codex_hooks = true',
+      '',
+      '[[hooks.SessionStart]]',
+      '',
+      '[[hooks.SessionStart.hooks]]',
+      'type = "command"',
+      `command = ${JSON.stringify(portableCommand)}`,
+      '',
+    ].join('\n'));
+
+    runCodexInstall(codexHome);
+
+    const parsed = parseTomlToObject(readCodexConfig(codexHome));
+    const commands = parsed.hooks.SessionStart.flatMap((entry) =>
+      Array.isArray(entry.hooks) ? entry.hooks.map((hook) => hook.command).filter(Boolean) : []
+    );
+    const managedCommands = commands.filter((command) =>
+      command.includes('/hooks/gsd-check-update.js')
+    );
+
+    assert.strictEqual(
+      managedCommands.length,
+      1,
+      'global portable managed Codex hook should be recognized as already managed on reinstall'
+    );
+    assert.ok(commands.includes(portableCommand), 'existing portable managed command should be preserved');
+  });
+
+  test('Codex hook block TOML-escapes a single-quoted Node runner command', () => {
+    codexHome = path.join(tmpDir, 'codex-home-$(touch pwn)-`uname`');
+
+    withExecPath("/tmp/node-$(touch /tmp/pwn)-`uname`-it's/bin/node", () => {
+      const command = buildHookCommand(codexHome, 'gsd-check-update.js');
+      const block = buildCodexHookBlock(codexHome, {
+        absoluteRunner: resolveNodeRunner(),
+        eol: '\n',
+      });
+      const parsed = parseTomlToObject(block);
+
+      assert.strictEqual(
+        command,
+        "'/tmp/node-$(touch /tmp/pwn)-`uname`-it'\"'\"'s/bin/node' " +
+          `'${codexHome.replace(/\\/g, '/')}/hooks/gsd-check-update.js'`
+      );
+      assert.strictEqual(
+        parsed.hooks.SessionStart[0].hooks[0].command,
+        command,
+        'Codex config command must preserve the shell-safe single-quoted runner'
+      );
+      assert.ok(
+        block.includes(`command = ${JSON.stringify(command)}`),
+        'Codex config must remain valid TOML by TOML-escaping the full shell command'
+      );
+      assert.ok(!block.includes('"/tmp/node-$(touch /tmp/pwn)-`uname`'), 'runner must not be a double-quoted shell token');
+    });
+  });
+
+  test('legacy Codex hook rewrite shell-single-quotes double-quoted script paths with metacharacters', () => {
+    const content = [
+      '[[hooks.SessionStart]]',
+      '',
+      '[[hooks.SessionStart.hooks]]',
+      'type = "command"',
+      'command = "node \\"/tmp/evil $(touch /tmp/pwn) `uname`/hooks/gsd-check-update.js\\""',
+      '',
+    ].join('\n');
+    const absoluteRunner = "'/usr/local/bin/node'";
+
+    const result = rewriteLegacyCodexHookBlock(content, absoluteRunner);
+    const parsed = parseTomlToObject(result.content);
+
+    assert.equal(result.changed, true);
+    assert.strictEqual(
+      parsed.hooks.SessionStart[0].hooks[0].command,
+      `${absoluteRunner} '/tmp/evil $(touch /tmp/pwn) \`uname\`/hooks/gsd-check-update.js'`,
+    );
+    assert.ok(
+      result.content.includes(
+        `command = "${absoluteRunner} '/tmp/evil $(touch /tmp/pwn) \`uname\`/hooks/gsd-check-update.js'"`,
+      ),
+      'migrated command must TOML-escape the shell-single-quoted script path',
+    );
+    assert.ok(
+      !result.content.includes('\\"/tmp/evil $(touch /tmp/pwn) `uname`/hooks/gsd-check-update.js\\"'),
+      'migrated command must not preserve unsafe double-quoted shell script token',
+    );
+  });
+
+  test('legacy Codex hook rewrite preserves user-owned same-basename commands', () => {
+    const content = [
+      '[[hooks.SessionStart]]',
+      '',
+      '[[hooks.SessionStart.hooks]]',
+      'type = "command"',
+      'command = "node /tmp/user/hooks/gsd-check-update.js"',
+      '',
+    ].join('\n');
+    const absoluteRunner = "'/usr/local/bin/node'";
+
+    const result = rewriteLegacyCodexHookBlock(content, absoluteRunner, {
+      targetDir: '/Users/example/.codex',
+    });
+
+    assert.equal(result.changed, false);
+    assert.strictEqual(result.content, content);
+  });
+
+  test('stale hook stripper preserves user-owned same-basename commands outside targetDir', () => {
+    const targetDir = '/Users/example/.codex';
+    const content = [
+      '[[hooks.SessionStart]]',
+      '',
+      '[[hooks.SessionStart.hooks]]',
+      'type = "command"',
+      'command = "node /tmp/user/hooks/gsd-check-update.js"',
+      '',
+      '[[hooks.SessionStart]]',
+      '',
+      '[[hooks.SessionStart.hooks]]',
+      'type = "command"',
+      `command = "node ${targetDir}/hooks/gsd-check-update.js"`,
+      '',
+    ].join('\n');
+
+    const result = stripStaleGsdHookBlocks(content, { targetDir });
+
+    assert.ok(result.includes('/tmp/user/hooks/gsd-check-update.js'), 'preserves user-owned same-basename hook');
+    assert.ok(!result.includes(`${targetDir}/hooks/gsd-check-update.js`), 'strips managed hook under targetDir');
   });
 
   test('config_file paths are absolute using CODEX_HOME', () => {

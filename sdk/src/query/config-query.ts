@@ -20,7 +20,8 @@ import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { GSDError, ErrorClassification } from '../errors.js';
 import { loadConfig } from '../config.js';
-import { planningPaths } from './helpers.js';
+import { planningPaths, resolvePathUnderProject } from './helpers.js';
+import { hasPrototypeReservedSegment } from './config-schema.js';
 import { maskIfSecret } from './secrets.js';
 import type { QueryHandler } from './utils.js';
 export { MODEL_PROFILES, VALID_PROFILES, getAgentToModelMapForProfile } from '../model-catalog.js';
@@ -57,11 +58,15 @@ export const configGet: QueryHandler = async (args, projectDir, workstream) => {
   if (!keyPath) {
     throw new GSDError('Usage: config-get <key.path> [--default <value>]', ErrorClassification.Validation);
   }
+  if (hasPrototypeReservedSegment(keyPath)) {
+    throw new GSDError(`Key not found: ${keyPath}`, ErrorClassification.Execution);
+  }
 
   const paths = planningPaths(projectDir, workstream);
+  const configFilePath = await resolvePathUnderProject(projectDir, paths.config);
   let raw: string;
   try {
-    raw = await readFile(paths.config, 'utf-8');
+    raw = await readFile(configFilePath, 'utf-8');
   } catch {
     throw new GSDError(`No config.json found at ${paths.config}`, ErrorClassification.Validation);
   }
@@ -79,13 +84,13 @@ export const configGet: QueryHandler = async (args, projectDir, workstream) => {
     if (current === undefined || current === null || typeof current !== 'object') {
       // UNIX convention (cf. `git config --get`): missing key exits 1, not 10.
       // See issue #2544 — callers use `if ! gsd-sdk query config-get k; then` patterns.
-      if (defaultValue !== undefined) return { data: defaultValue };
+      if (defaultValue !== undefined) return { data: maskIfSecret(keyPath, defaultValue) };
       throw new GSDError(`Key not found: ${keyPath}`, ErrorClassification.Execution);
     }
     current = (current as Record<string, unknown>)[key];
   }
   if (current === undefined) {
-    if (defaultValue !== undefined) return { data: defaultValue };
+    if (defaultValue !== undefined) return { data: maskIfSecret(keyPath, defaultValue) };
     throw new GSDError(`Key not found: ${keyPath}`, ErrorClassification.Execution);
   }
 
@@ -109,6 +114,16 @@ export const configGet: QueryHandler = async (args, projectDir, workstream) => {
  */
 export const configPath: QueryHandler = async (_args, projectDir, workstream) => {
   const paths = planningPaths(projectDir, workstream);
+  const rootPlanningPath = planningPaths(projectDir).planning;
+  if (existsSync(rootPlanningPath)) {
+    await resolvePathUnderProject(projectDir, rootPlanningPath);
+  }
+  if (workstream && existsSync(paths.planning)) {
+    await resolvePathUnderProject(projectDir, paths.planning);
+  }
+  if (existsSync(paths.config)) {
+    await resolvePathUnderProject(projectDir, paths.config);
+  }
   return { data: { path: paths.config } };
 };
 
@@ -133,7 +148,15 @@ export const resolveModel: QueryHandler = async (args, projectDir, workstream) =
     throw new GSDError('agent-type required', ErrorClassification.Validation);
   }
 
-  const configFilePath = planningPaths(projectDir, workstream).config;
+  const paths = planningPaths(projectDir, workstream);
+  const rootPlanningPath = planningPaths(projectDir).planning;
+  if (existsSync(rootPlanningPath)) {
+    await resolvePathUnderProject(projectDir, rootPlanningPath);
+  }
+  if (existsSync(paths.config)) {
+    await resolvePathUnderProject(projectDir, paths.config);
+  }
+  const configFilePath = paths.config;
   const configExists = existsSync(configFilePath);
   const config = await loadConfig(projectDir, workstream);
   const profile = String(config.model_profile || 'balanced').toLowerCase();

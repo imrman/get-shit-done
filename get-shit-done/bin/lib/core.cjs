@@ -5,7 +5,8 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { execSync, execFileSync, spawnSync } = require('child_process');
+const childProcess = require('child_process');
+const { execSync, execFileSync, spawnSync } = childProcess;
 const { MODEL_PROFILES, AGENT_TO_PHASE_TYPE, VALID_PHASE_TYPES, AGENT_DEFAULT_TIERS, VALID_AGENT_TIERS, nextTier } = require('./model-profiles.cjs');
 const { MODEL_ALIAS_MAP, RUNTIME_PROFILE_MAP, KNOWN_RUNTIMES, RUNTIMES_WITH_REASONING_EFFORT } = require('./model-catalog.cjs');
 // Compatibility shim: new imports should use planning-workspace.cjs directly.
@@ -333,13 +334,71 @@ function _deepMergeConfig(base, overlay) {
 }
 
 function loadConfig(cwd) {
+  const rootPlanningBase = planningRoot(cwd);
+  const scopedPlanningBase = planningDir(cwd, null);
+  const activePlanningBase = planningDir(cwd);
+  const projectBase = path.dirname(rootPlanningBase);
+  const resolveThroughExistingAncestor = (targetPath) => {
+    const missing = [];
+    let existingPath = targetPath;
+    while (true) {
+      try {
+        fs.lstatSync(existingPath);
+        break;
+      } catch (err) {
+        if (err.code !== 'ENOENT') throw err;
+        const parent = path.dirname(existingPath);
+        if (parent === existingPath) throw err;
+        missing.unshift(path.basename(existingPath));
+        existingPath = parent;
+      }
+    }
+    return path.join(fs.realpathSync(existingPath), ...missing);
+  };
+  const isPathWithin = (parentPath, targetPath) => {
+    const relative = path.relative(parentPath, targetPath);
+    return relative === '' || (!path.isAbsolute(relative) && relative !== '..' && !relative.startsWith(`..${path.sep}`));
+  };
+  const assertSafeConfigLeaf = (configPath) => {
+    try {
+      const stat = fs.lstatSync(configPath);
+      if (stat.isSymbolicLink()) {
+        throw new Error(`Refusing to follow symlink config.json: ${configPath}`);
+      }
+    } catch (err) {
+      if (err.code === 'ENOENT') return;
+      throw err;
+    }
+  };
+  const realProjectBase = resolveThroughExistingAncestor(projectBase);
+  const realRootPlanningBase = resolveThroughExistingAncestor(rootPlanningBase);
+  if (!isPathWithin(realProjectBase, realRootPlanningBase)) {
+    throw new Error(`.planning path resolves outside the project: ${rootPlanningBase}`);
+  }
+  const realScopedPlanningBase = resolveThroughExistingAncestor(scopedPlanningBase);
+  if (!isPathWithin(realRootPlanningBase, realScopedPlanningBase)) {
+    throw new Error(`.planning path resolves outside the project: ${scopedPlanningBase}`);
+  }
+
+  const ws = process.env.GSD_WORKSTREAM || null;
+  let realActivePlanningBase = realScopedPlanningBase;
+  if (ws) {
+    const workstreamsBase = path.join(scopedPlanningBase, 'workstreams');
+    const realWorkstreamsBase = resolveThroughExistingAncestor(workstreamsBase);
+    realActivePlanningBase = resolveThroughExistingAncestor(activePlanningBase);
+    if (!isPathWithin(realScopedPlanningBase, realWorkstreamsBase) ||
+        !isPathWithin(realWorkstreamsBase, realActivePlanningBase)) {
+      throw new Error(`.planning path resolves outside the project: ${activePlanningBase}`);
+    }
+  }
+
   // When GSD_WORKSTREAM is set, load root config first so workstream config
   // can inherit from it. This prevents users from duplicating model_overrides,
   // workflow.*, etc. across every workstream config (#2714).
-  const ws = process.env.GSD_WORKSTREAM || null;
   let rootParsed = null;
   if (ws) {
-    const rootConfigPath = path.join(planningRoot(cwd), 'config.json');
+    const rootConfigPath = path.join(realRootPlanningBase, 'config.json');
+    assertSafeConfigLeaf(rootConfigPath);
     try {
       const raw = fs.readFileSync(rootConfigPath, 'utf-8');
       rootParsed = JSON.parse(raw);
@@ -348,7 +407,8 @@ function loadConfig(cwd) {
     }
   }
 
-  const configPath = path.join(planningDir(cwd), 'config.json');
+  const configPath = path.join(realActivePlanningBase, 'config.json');
+  assertSafeConfigLeaf(configPath);
   const defaults = CONFIG_DEFAULTS;
 
   try {
@@ -362,7 +422,7 @@ function loadConfig(cwd) {
       const depthToGranularity = { quick: 'coarse', standard: 'standard', comprehensive: 'fine' };
       fileData.granularity = depthToGranularity[fileData.depth] || fileData.depth;
       delete fileData.depth;
-      try { fs.writeFileSync(configPath, JSON.stringify(fileData, null, 2), 'utf-8'); } catch { /* intentionally empty */ }
+      try { atomicWriteFileSync(configPath, JSON.stringify(fileData, null, 2), 'utf-8'); } catch { /* intentionally empty */ }
     }
 
     // Auto-detect and sync sub_repos: scan for child directories with .git
@@ -410,7 +470,7 @@ function loadConfig(cwd) {
     // Persist sub_repos changes (migration or sync) — write only the on-disk
     // file contents, never the merged result, to avoid polluting workstream configs.
     if (configDirty) {
-      try { fs.writeFileSync(configPath, JSON.stringify(fileData, null, 2), 'utf-8'); } catch {}
+      try { atomicWriteFileSync(configPath, JSON.stringify(fileData, null, 2), 'utf-8'); } catch {}
     }
 
     // Now apply root→workstream inheritance. `parsed` is the effective config
@@ -535,7 +595,7 @@ function loadConfig(cwd) {
     // If .planning/ exists, the project is initialized — just missing config.json.
     // When GSD_WORKSTREAM is set and root config was loaded, the workstream config
     // doesn't exist — treat root config as the effective config for this workstream.
-    if (fs.existsSync(planningDir(cwd))) {
+    if (fs.existsSync(realActivePlanningBase)) {
       if (rootParsed) {
         // Workstream has no config.json: re-parse using root config as the sole source.
         // Temporarily clear GSD_WORKSTREAM so planningDir() returns root .planning/,
@@ -1956,22 +2016,103 @@ function readSubdirectories(dirPath, sort = false) {
  * the same filesystem (required for rename atomicity). The PID is embedded in
  * the temp file name so concurrent writers use distinct paths.
  *
- * If `renameSync` fails (e.g. cross-device move), the function falls back to a
- * direct `writeFileSync` so callers always get a best-effort write.
+ * The temporary file is created exclusively; an existing symlink is rejected
+ * without being followed or removed.
  *
  * @param {string} filePath  Absolute path to write.
  * @param {string|Buffer} content  File content.
- * @param {string} [encoding='utf-8']  Encoding passed to writeFileSync.
+ * @param {string|object} [encoding='utf-8']  Options passed to writeFileSync.
  */
-function atomicWriteFileSync(filePath, content, encoding = 'utf-8') {
-  const tmpPath = filePath + '.tmp.' + process.pid;
+const ATOMIC_WRITE_CHILD_SCRIPT = String.raw`
+'use strict';
+
+const fs = require('fs');
+const crypto = require('crypto');
+
+try {
+  const expectedDev = BigInt(process.argv[1]);
+  const expectedIno = BigInt(process.argv[2]);
+  const targetName = process.argv[3];
+  const currentDirectory = fs.statSync('.', { bigint: true });
+  if (currentDirectory.dev !== expectedDev || currentDirectory.ino !== expectedIno) {
+    throw new Error('Refusing to write through replaced parent directory');
+  }
+
+  const content = fs.readFileSync(0);
+  const predictableTmpPath = targetName + '.tmp.' + process.ppid;
+  const tmpPath = predictableTmpPath + '.' + crypto.randomBytes(16).toString('hex');
+  let tempIdentity = null;
+
   try {
-    fs.writeFileSync(tmpPath, content, encoding);
-    fs.renameSync(tmpPath, filePath);
-  } catch (renameErr) {
-    // Clean up the temp file if rename failed, then fall back to direct write.
-    try { fs.unlinkSync(tmpPath); } catch { /* already gone or never created */ }
-    fs.writeFileSync(filePath, content, encoding);
+    try {
+      const staleStat = fs.lstatSync(predictableTmpPath, { bigint: true });
+      if (staleStat.isSymbolicLink() || !staleStat.isFile()) {
+        throw new Error('Refusing to replace unsafe temporary file: ' + predictableTmpPath);
+      }
+      const currentStat = fs.lstatSync(predictableTmpPath, { bigint: true });
+      if (!currentStat.isFile() || currentStat.dev !== staleStat.dev || currentStat.ino !== staleStat.ino) {
+        throw new Error('Refusing to replace unsafe temporary file: ' + predictableTmpPath);
+      }
+      fs.unlinkSync(predictableTmpPath);
+    } catch (err) {
+      if (err.code !== 'ENOENT') throw err;
+    }
+
+    const fd = fs.openSync(tmpPath, 'wx');
+    try {
+      tempIdentity = fs.fstatSync(fd, { bigint: true });
+      fs.writeFileSync(fd, content);
+    } finally {
+      fs.closeSync(fd);
+    }
+
+    const currentTemp = fs.lstatSync(tmpPath, { bigint: true });
+    if (!currentTemp.isFile() || currentTemp.dev !== tempIdentity.dev || currentTemp.ino !== tempIdentity.ino) {
+      throw new Error('Refusing to rename replaced temporary file: ' + tmpPath);
+    }
+    fs.renameSync(tmpPath, targetName);
+  } catch (err) {
+    if (tempIdentity) {
+      try {
+        const currentStat = fs.lstatSync(tmpPath, { bigint: true });
+        if (currentStat.isFile() && currentStat.dev === tempIdentity.dev && currentStat.ino === tempIdentity.ino) {
+          fs.unlinkSync(tmpPath);
+        }
+      } catch { /* already gone or replaced */ }
+    }
+    throw err;
+  }
+} catch (err) {
+  process.stderr.write('Atomic write failed: ' + (err && err.message ? err.message : String(err)) + '\n');
+  process.exitCode = 1;
+}
+`;
+
+function atomicWriteFileSync(filePath, content, encoding = 'utf-8') {
+  const parentPath = path.dirname(filePath);
+  const targetName = path.basename(filePath);
+  const parentIdentity = fs.lstatSync(parentPath, { bigint: true });
+  if (parentIdentity.isSymbolicLink() || !parentIdentity.isDirectory()) {
+    throw new Error(`Refusing to write through unsafe parent directory: ${parentPath}`);
+  }
+
+  const contentEncoding = typeof encoding === 'string' ? encoding : encoding?.encoding;
+  const contentBuffer = Buffer.isBuffer(content) ? content : Buffer.from(content, contentEncoding);
+  const result = childProcess.spawnSync(
+    process.execPath,
+    ['-e', ATOMIC_WRITE_CHILD_SCRIPT, parentIdentity.dev.toString(), parentIdentity.ino.toString(), targetName],
+    {
+      cwd: parentPath,
+      input: contentBuffer,
+      stdio: ['pipe', 'ignore', 'pipe'],
+      maxBuffer: 64 * 1024,
+    }
+  );
+
+  if (result.error) throw result.error;
+  if (result.status !== 0) {
+    const diagnostic = result.stderr?.toString('utf8').trim();
+    throw new Error(diagnostic || `Atomic write child failed${result.signal ? ` with signal ${result.signal}` : ''}`);
   }
 }
 

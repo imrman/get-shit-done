@@ -5,13 +5,20 @@
 const fs = require('fs');
 const path = require('path');
 const { output, error, CONFIG_DEFAULTS, atomicWriteFileSync } = require('./core.cjs');
-const { planningDir, withPlanningLock } = require('./planning-workspace.cjs');
+const { planningDir, planningRoot, withPlanningLock } = require('./planning-workspace.cjs');
 const {
   VALID_PROFILES,
   getAgentToModelMapForProfile,
   formatAgentToModelMapAsTable,
 } = require('./model-profiles.cjs');
-const { VALID_CONFIG_KEYS, isValidConfigKey } = require('./config-schema.cjs');
+const {
+  VALID_CONFIG_KEYS,
+  RUNTIME_STATE_KEYS,
+  DYNAMIC_KEY_PATTERNS,
+  getConfigValueDomainError,
+  hasPrototypeReservedSegment,
+  isValidConfigKey,
+} = require('./config-schema.cjs');
 const { isSecretKey, maskSecret } = require('./secrets.cjs');
 
 const CONFIG_KEY_SUGGESTIONS = {
@@ -34,6 +41,155 @@ function validateKnownConfigKeyPath(keyPath) {
   const suggested = CONFIG_KEY_SUGGESTIONS[keyPath];
   if (suggested) {
     error(`Unknown config key: ${keyPath}. Did you mean ${suggested}?`);
+  }
+}
+
+function isPlainObject(value) {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function validateConfigValuePolicy(keyPath, value) {
+  const domainError = getConfigValueDomainError(keyPath, value);
+  if (domainError) {
+    error(`Invalid ${keyPath} '${String(value)}'. ${domainError}`);
+  }
+}
+
+function resolveThroughExistingAncestor(targetPath) {
+  const missing = [];
+  let existingPath = targetPath;
+
+  while (true) {
+    try {
+      fs.lstatSync(existingPath);
+      break;
+    } catch (err) {
+      if (err.code !== 'ENOENT') throw err;
+      const parent = path.dirname(existingPath);
+      if (parent === existingPath) throw err;
+      missing.unshift(path.basename(existingPath));
+      existingPath = parent;
+    }
+  }
+
+  return path.join(fs.realpathSync(existingPath), ...missing);
+}
+
+function isPathWithin(parentPath, targetPath) {
+  const relative = path.relative(parentPath, targetPath);
+  return relative === '' || (!path.isAbsolute(relative) && relative !== '..' && !relative.startsWith(`..${path.sep}`));
+}
+
+function mutablePlanningDir(cwd) {
+  const planningBase = planningDir(cwd);
+  const rootPlanningBase = planningRoot(cwd);
+  const scopedPlanningBase = planningDir(cwd, null);
+  const workstreamMode = path.resolve(planningBase) !== path.resolve(scopedPlanningBase);
+  const projectBase = path.dirname(rootPlanningBase);
+  const workstreamsBase = path.join(scopedPlanningBase, 'workstreams');
+
+  try {
+    const realProjectBase = resolveThroughExistingAncestor(projectBase);
+    const realRootPlanningBase = resolveThroughExistingAncestor(rootPlanningBase);
+
+    if (!isPathWithin(realProjectBase, realRootPlanningBase)) {
+      error('Invalid planning config path outside project: ' + planningBase);
+    }
+
+    const realScopedPlanningBase = resolveThroughExistingAncestor(scopedPlanningBase);
+    if (!isPathWithin(realRootPlanningBase, realScopedPlanningBase)) {
+      error('Invalid planning config path outside project: ' + planningBase);
+    }
+    if (!workstreamMode) return realScopedPlanningBase;
+
+    const realWorkstreamsBase = resolveThroughExistingAncestor(workstreamsBase);
+    const realPlanningBase = resolveThroughExistingAncestor(planningBase);
+
+    if (!isPathWithin(realScopedPlanningBase, realWorkstreamsBase) ||
+        !isPathWithin(realWorkstreamsBase, realPlanningBase)) {
+      error('Invalid workstream config path outside project: ' + planningBase);
+    }
+
+    return realPlanningBase;
+  } catch (err) {
+    error('Invalid workstream config path: ' + err.message);
+  }
+}
+
+function revalidateConfigMutationPath(cwd, planningBase) {
+  const revalidatedPlanningBase = mutablePlanningDir(cwd);
+  if (path.resolve(revalidatedPlanningBase) !== path.resolve(planningBase)) {
+    error('Invalid workstream config path changed during mutation: ' + planningDir(cwd));
+  }
+  return path.join(revalidatedPlanningBase, 'config.json');
+}
+
+const VALID_CONFIG_SECTIONS = new Set([
+  ...[...VALID_CONFIG_KEYS, ...RUNTIME_STATE_KEYS]
+    .filter((key) => key.includes('.'))
+    .map((key) => key.split('.')[0]),
+  ...DYNAMIC_KEY_PATTERNS.map((pattern) => pattern.topLevel).filter(Boolean),
+  'git',
+  'workflow',
+  'hooks',
+  'agent_skills',
+  'features',
+  'review',
+  'models',
+  'dynamic_routing',
+  'model_overrides',
+  'model_profile_overrides',
+  'claude_md_assembly',
+]);
+
+function validateConfigSection(sectionName) {
+  if (sectionName.includes('.') || !VALID_CONFIG_SECTIONS.has(sectionName)) {
+    error(`Unknown config section: "${sectionName}"`);
+  }
+}
+
+function isValidConfigObjectPrefix(keyPath) {
+  if ([...VALID_CONFIG_KEYS, ...RUNTIME_STATE_KEYS].some((key) => key.startsWith(`${keyPath}.`))) {
+    return true;
+  }
+  if (keyPath === 'review.models') return true;
+  if (keyPath === 'claude_md_assembly.blocks') return true;
+  if (keyPath === 'dynamic_routing.tier_models') return true;
+  return /^model_profile_overrides\.[a-zA-Z0-9_-]+$/.test(keyPath) &&
+    isValidConfigKey(`${keyPath}.opus`);
+}
+
+function validateConfigPolicy(config, source) {
+  const visit = (value, keyPath) => {
+    validateConfigValuePolicy(keyPath, value);
+
+    if (isPlainObject(value)) {
+      const entries = Object.entries(value);
+      if (!keyPath.includes('.')) {
+        validateConfigSection(keyPath);
+      } else if ((entries.length === 0 && !isValidConfigKey(keyPath)) ||
+        (entries.length > 0 && !isValidConfigObjectPrefix(keyPath))) {
+        validateKnownConfigKeyPath(keyPath);
+        error(`Unknown config key in ${source}: "${keyPath}"`);
+      }
+      for (const [childKey, childValue] of entries) {
+        visit(childValue, `${keyPath}.${childKey}`);
+      }
+      return;
+    }
+
+    if (!keyPath.includes('.') && VALID_CONFIG_SECTIONS.has(keyPath)) {
+      error(`Invalid config section "${keyPath}" in ${source}: expected object`);
+    }
+
+    validateKnownConfigKeyPath(keyPath);
+    if (!isValidConfigKey(keyPath)) {
+      error(`Unknown config key in ${source}: "${keyPath}"`);
+    }
+  };
+
+  for (const [key, value] of Object.entries(config)) {
+    visit(value, key);
   }
 }
 
@@ -74,9 +230,12 @@ function buildNewProjectConfig(userChoices) {
         const depthToGranularity = { quick: 'coarse', standard: 'standard', comprehensive: 'fine' };
         userDefaults.granularity = depthToGranularity[userDefaults.depth] || userDefaults.depth;
         delete userDefaults.depth;
+        validateConfigPolicy(userDefaults, 'global defaults');
         try {
           fs.writeFileSync(globalDefaultsPath, JSON.stringify(userDefaults, null, 2), 'utf-8');
         } catch { /* intentionally empty */ }
+      } else {
+        validateConfigPolicy(userDefaults, 'global defaults');
       }
     }
   } catch {
@@ -136,7 +295,7 @@ function buildNewProjectConfig(userChoices) {
   };
 
   // Three-level deep merge: hardcoded <- userDefaults <- choices
-  return {
+  const config = {
     ...hardcoded,
     ...userDefaults,
     ...choices,
@@ -161,6 +320,8 @@ function buildNewProjectConfig(userChoices) {
       ...(choices.agent_skills || {}),
     },
   };
+  validateConfigPolicy(config, 'new project config');
+  return config;
 }
 
 /**
@@ -173,7 +334,7 @@ function buildNewProjectConfig(userChoices) {
  * Idempotent: if config.json already exists, returns { created: false }.
  */
 function cmdConfigNewProject(cwd, choicesJson, raw) {
-  const planningBase = planningDir(cwd);
+  const planningBase = mutablePlanningDir(cwd);
   const configPath = path.join(planningBase, 'config.json');
 
   // Idempotent: don't overwrite existing config
@@ -190,6 +351,10 @@ function cmdConfigNewProject(cwd, choicesJson, raw) {
     } catch (err) {
       error('Invalid JSON for config-new-project: ' + err.message);
     }
+    if (!isPlainObject(userChoices)) {
+      error('Invalid JSON for config-new-project: expected object');
+    }
+    validateConfigPolicy(userChoices, 'config-new-project user choices');
   }
 
   // Ensure .planning directory exists
@@ -204,7 +369,8 @@ function cmdConfigNewProject(cwd, choicesJson, raw) {
   const config = buildNewProjectConfig(userChoices);
 
   try {
-    atomicWriteFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8');
+    const mutationConfigPath = revalidateConfigMutationPath(cwd, planningBase);
+    atomicWriteFileSync(mutationConfigPath, JSON.stringify(config, null, 2), 'utf-8');
     output({ created: true, path: '.planning/config.json' }, raw, 'created');
   } catch (err) {
     error('Failed to write config.json: ' + err.message);
@@ -218,7 +384,7 @@ function cmdConfigNewProject(cwd, choicesJson, raw) {
  * the happy path. But note that `error()` will still `exit(1)` out of the process.
  */
 function ensureConfigFile(cwd) {
-  const planningBase = planningDir(cwd);
+  const planningBase = mutablePlanningDir(cwd);
   const configPath = path.join(planningBase, 'config.json');
 
   // Ensure .planning directory exists
@@ -238,7 +404,8 @@ function ensureConfigFile(cwd) {
   const config = buildNewProjectConfig({});
 
   try {
-    atomicWriteFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8');
+    const mutationConfigPath = revalidateConfigMutationPath(cwd, planningBase);
+    atomicWriteFileSync(mutationConfigPath, JSON.stringify(config, null, 2), 'utf-8');
     return { created: true, path: '.planning/config.json' };
   } catch (err) {
     error('Failed to create config.json: ' + err.message);
@@ -268,7 +435,8 @@ function cmdConfigEnsureSection(cwd, raw) {
  * the happy path. But note that `error()` will still `exit(1)` out of the process.
  */
 function setConfigValue(cwd, keyPath, parsedValue) {
-  const configPath = path.join(planningDir(cwd), 'config.json');
+  const planningBase = mutablePlanningDir(cwd);
+  const configPath = path.join(planningBase, 'config.json');
 
   return withPlanningLock(cwd, () => {
     // Load existing config or start with empty object
@@ -296,7 +464,8 @@ function setConfigValue(cwd, keyPath, parsedValue) {
 
     // Write back
     try {
-      atomicWriteFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8');
+      const mutationConfigPath = revalidateConfigMutationPath(cwd, planningBase);
+      atomicWriteFileSync(mutationConfigPath, JSON.stringify(config, null, 2), 'utf-8');
       return { updated: true, key: keyPath, value: parsedValue, previousValue };
     } catch (err) {
       error('Failed to write config.json: ' + err.message);
@@ -315,6 +484,9 @@ function cmdConfigSet(cwd, keyPath, value, raw) {
   if (!keyPath) {
     error('Usage: config-set <key.path> <value>');
   }
+  if (value === undefined) {
+    error('Usage: config-set <key.path> <value>');
+  }
 
   validateKnownConfigKeyPath(keyPath);
 
@@ -331,27 +503,11 @@ function cmdConfigSet(cwd, keyPath, value, raw) {
     try { parsedValue = JSON.parse(value); } catch { /* keep as string */ }
   }
 
+  validateConfigValuePolicy(keyPath, parsedValue);
+
   const VALID_CONTEXT_VALUES = ['dev', 'research', 'review'];
   if (keyPath === 'context' && !VALID_CONTEXT_VALUES.includes(String(parsedValue))) {
     error(`Invalid context value '${value}'. Valid values: ${VALID_CONTEXT_VALUES.join(', ')}`);
-  }
-
-  // Codebase drift detector (#2003)
-  const VALID_DRIFT_ACTIONS = ['warn', 'auto-remap'];
-  if (keyPath === 'workflow.drift_action' && !VALID_DRIFT_ACTIONS.includes(String(parsedValue))) {
-    error(`Invalid workflow.drift_action '${value}'. Valid values: ${VALID_DRIFT_ACTIONS.join(', ')}`);
-  }
-  if (keyPath === 'workflow.drift_threshold') {
-    if (typeof parsedValue !== 'number' || !Number.isInteger(parsedValue) || parsedValue < 1) {
-      error(`Invalid workflow.drift_threshold '${value}'. Must be a positive integer.`);
-    }
-  }
-
-  // Post-planning gap checker (#2493)
-  if (keyPath === 'workflow.post_planning_gaps') {
-    if (typeof parsedValue !== 'boolean') {
-      error(`Invalid workflow.post_planning_gaps '${value}'. Must be a boolean (true or false).`);
-    }
   }
 
   const setConfigValueResult = setConfigValue(cwd, keyPath, parsedValue);
@@ -378,11 +534,14 @@ function cmdConfigSet(cwd, keyPath, value, raw) {
 }
 
 function cmdConfigGet(cwd, keyPath, raw, defaultValue) {
-  const configPath = path.join(planningDir(cwd), 'config.json');
+  const configPath = path.join(mutablePlanningDir(cwd), 'config.json');
   const hasDefault = defaultValue !== undefined;
 
   if (!keyPath) {
     error('Usage: config-get <key.path> [--default <value>]');
+  }
+  if (hasPrototypeReservedSegment(keyPath)) {
+    error(`Key not found: ${keyPath}`);
   }
 
   let config = {};
@@ -498,7 +657,7 @@ function getCmdConfigSetModelProfileResultMessage(
 function cmdConfigPath(cwd) {
   // Always emit as plain text — a file path is used via shell substitution,
   // never consumed as JSON. Passing raw=true forces plain-text output.
-  const configPath = path.join(planningDir(cwd), 'config.json');
+  const configPath = path.join(mutablePlanningDir(cwd), 'config.json');
   output(configPath, true, configPath);
 }
 

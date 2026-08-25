@@ -1,5 +1,7 @@
 'use strict';
 
+const { VALID_PROFILES } = require('./model-profiles.cjs');
+
 /**
  * Single source of truth for valid config key paths.
  *
@@ -113,13 +115,67 @@ const DYNAMIC_KEY_PATTERNS = [
   { topLevel: 'model_overrides', test: (k) => /^model_overrides\.[a-zA-Z0-9_-]+$/.test(k), description: 'model_overrides.<agent-id>' },
 ];
 
+const CONFIG_VALUE_DOMAINS = new Map([
+  ['model_profile', {
+    test: (value) => typeof value === 'string' && VALID_PROFILES.includes(value),
+    description: `Valid values: ${VALID_PROFILES.join(', ')}.`,
+  }],
+  ['workflow.drift_action', {
+    test: (value) => typeof value === 'string' && ['warn', 'auto-remap'].includes(value),
+    description: 'Valid values: warn, auto-remap.',
+  }],
+  ['workflow.drift_threshold', {
+    test: (value) => Number.isInteger(value) && value >= 1,
+    description: 'Must be an integer greater than or equal to 1.',
+  }],
+  ['workflow.post_planning_gaps', {
+    test: (value) => typeof value === 'boolean',
+    description: 'Must be a boolean (true or false).',
+  }],
+  ['workflow.security_enforcement', {
+    test: (value) => typeof value === 'boolean',
+    description: 'Must be a boolean (true or false).',
+  }],
+  ['workflow.security_asvs_level', {
+    test: (value) => Number.isInteger(value) && value >= 1 && value <= 3,
+    description: 'Must be an integer (1, 2, or 3).',
+  }],
+  ['workflow.security_block_on', {
+    test: (value) => typeof value === 'string' && ['high', 'medium', 'low'].includes(value),
+    description: 'Valid values: high, medium, low.',
+  }],
+]);
+
+function getConfigValueDomainError(keyPath, value) {
+  const domain = CONFIG_VALUE_DOMAINS.get(keyPath);
+  return domain && !domain.test(value) ? domain.description : null;
+}
+
+const PROTOTYPE_RESERVED_CONFIG_SEGMENTS = new Set([
+  '__proto__',
+  'prototype',
+  'constructor',
+]);
+
+function hasPrototypeReservedSegment(keyPath) {
+  return keyPath.split('.').some((segment) => PROTOTYPE_RESERVED_CONFIG_SEGMENTS.has(segment));
+}
+
 /**
  * Returns true if keyPath is a valid config key (exact, dynamic pattern, or runtime state).
  */
 function isValidConfigKey(keyPath) {
+  if (hasPrototypeReservedSegment(keyPath)) return false;
   if (VALID_CONFIG_KEYS.has(keyPath)) return true;
   if (RUNTIME_STATE_KEYS.has(keyPath)) return true;
   return DYNAMIC_KEY_PATTERNS.some((p) => p.test(keyPath));
 }
 
-module.exports = { VALID_CONFIG_KEYS, RUNTIME_STATE_KEYS, DYNAMIC_KEY_PATTERNS, isValidConfigKey };
+module.exports = {
+  VALID_CONFIG_KEYS,
+  RUNTIME_STATE_KEYS,
+  DYNAMIC_KEY_PATTERNS,
+  getConfigValueDomainError,
+  hasPrototypeReservedSegment,
+  isValidConfigKey,
+};

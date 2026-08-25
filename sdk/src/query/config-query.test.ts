@@ -3,8 +3,8 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtemp, writeFile, mkdir, rm, readdir } from 'node:fs/promises';
-import { join, resolve } from 'node:path';
+import { mkdtemp, writeFile, mkdir, rm, readdir, symlink } from 'node:fs/promises';
+import { basename, join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { GSDError, ErrorClassification, exitCodeFor } from '../errors.js';
 
@@ -58,6 +58,15 @@ describe('configGet', () => {
     await expect(configGet(['nonexistent.key'], tmpDir)).rejects.toThrow(GSDError);
   });
 
+  it('rejects prototype-reserved key path segments', async () => {
+    const { configGet } = await import('./config-query.js');
+    await writeFile(join(tmpDir, '.planning', 'config.json'), JSON.stringify({}));
+
+    for (const keyPath of ['__proto__', 'constructor', 'constructor.prototype']) {
+      await expect(configGet([keyPath], tmpDir)).rejects.toThrow(GSDError);
+    }
+  });
+
   it('throws GSDError that maps to exit code 1 for missing key (bug #2544)', async () => {
     const { configGet } = await import('./config-query.js');
     await writeFile(
@@ -102,6 +111,101 @@ describe('configGet', () => {
     );
     // Accessing workflow should fail (not merged with defaults)
     await expect(configGet(['workflow.auto_advance'], tmpDir)).rejects.toThrow(GSDError);
+  });
+
+  it('rejects invalid direct SDK workstream names before config-get can read outside the project', async () => {
+    const { createRegistry } = await import('./index.js');
+    const escapeName = `${basename(tmpDir)}-escape`;
+    const escapeDir = join(tmpDir, '..', escapeName);
+    try {
+      await mkdir(escapeDir, { recursive: true });
+      await writeFile(join(escapeDir, 'config.json'), JSON.stringify({ model_profile: 'escaped' }));
+
+      const result = await createRegistry()
+        .dispatch('config-get', ['model_profile'], tmpDir, `../../../${escapeName}`)
+        .then((value) => value, (err: unknown) => err);
+
+      expect(result).toBeInstanceOf(GSDError);
+      expect((result as GSDError).classification).toBe(ErrorClassification.Validation);
+    } finally {
+      await rm(escapeDir, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects a root .planning symlink that redirects config outside the project', async () => {
+    const { configGet } = await import('./config-query.js');
+    const outsideDir = await mkdtemp(join(tmpdir(), 'gsd-cfg-query-root-'));
+    try {
+      await writeFile(join(outsideDir, 'config.json'), JSON.stringify({ model_profile: 'external' }));
+      await rm(join(tmpDir, '.planning'), { recursive: true, force: true });
+      await symlink(outsideDir, join(tmpDir, '.planning'), 'dir');
+
+      const result = await configGet(['model_profile'], tmpDir)
+        .then((value) => value, (err: unknown) => err);
+
+      expect(result).toBeInstanceOf(GSDError);
+      expect((result as GSDError).classification).toBe(ErrorClassification.Validation);
+    } finally {
+      await rm(outsideDir, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects a workstream symlink that redirects config outside the project', async () => {
+    const { configGet } = await import('./config-query.js');
+    const outsideDir = await mkdtemp(join(tmpdir(), 'gsd-cfg-query-workstream-'));
+    try {
+      await writeFile(join(outsideDir, 'config.json'), JSON.stringify({ model_profile: 'external' }));
+      await mkdir(join(tmpDir, '.planning', 'workstreams'), { recursive: true });
+      await symlink(outsideDir, join(tmpDir, '.planning', 'workstreams', 'frontend'), 'dir');
+
+      const result = await configGet(['model_profile'], tmpDir, 'frontend')
+        .then((value) => value, (err: unknown) => err);
+
+      expect(result).toBeInstanceOf(GSDError);
+      expect((result as GSDError).classification).toBe(ErrorClassification.Validation);
+    } finally {
+      await rm(outsideDir, { recursive: true, force: true });
+    }
+  });
+});
+
+// ─── configPath ─────────────────────────────────────────────────────────────
+
+describe('configPath', () => {
+  it('rejects a root .planning symlink that redirects config outside the project', async () => {
+    const { configPath } = await import('./config-query.js');
+    const outsideDir = await mkdtemp(join(tmpdir(), 'gsd-config-path-root-'));
+    try {
+      await writeFile(join(outsideDir, 'config.json'), JSON.stringify({ model_profile: 'external' }));
+      await rm(join(tmpDir, '.planning'), { recursive: true, force: true });
+      await symlink(outsideDir, join(tmpDir, '.planning'), 'dir');
+
+      const result = await configPath([], tmpDir)
+        .then((value) => value, (err: unknown) => err);
+
+      expect(result).toBeInstanceOf(GSDError);
+      expect((result as GSDError).classification).toBe(ErrorClassification.Validation);
+    } finally {
+      await rm(outsideDir, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects a workstream symlink that redirects config outside the project', async () => {
+    const { configPath } = await import('./config-query.js');
+    const outsideDir = await mkdtemp(join(tmpdir(), 'gsd-config-path-workstream-'));
+    try {
+      await writeFile(join(outsideDir, 'config.json'), JSON.stringify({ model_profile: 'external' }));
+      await mkdir(join(tmpDir, '.planning', 'workstreams'), { recursive: true });
+      await symlink(outsideDir, join(tmpDir, '.planning', 'workstreams', 'frontend'), 'dir');
+
+      const result = await configPath([], tmpDir, 'frontend')
+        .then((value) => value, (err: unknown) => err);
+
+      expect(result).toBeInstanceOf(GSDError);
+      expect((result as GSDError).classification).toBe(ErrorClassification.Validation);
+    } finally {
+      await rm(outsideDir, { recursive: true, force: true });
+    }
   });
 });
 
@@ -158,6 +262,14 @@ describe('resolveModel', () => {
     await expect(resolveModel([], tmpDir)).rejects.toThrow(GSDError);
   });
 
+  it('preserves defaults when config.json is missing', async () => {
+    const { resolveModel } = await import('./config-query.js');
+
+    const result = await resolveModel(['gsd-planner'], tmpDir);
+
+    expect(result.data).toEqual({ model: '', profile: 'balanced' });
+  });
+
   it('respects model_overrides from config', async () => {
     const { resolveModel } = await import('./config-query.js');
     await writeFile(
@@ -210,6 +322,42 @@ describe('resolveModel', () => {
     expect(wsData.profile).toBe('quality');
     expect(wsData.model).toBe('opus');
   });
+
+  it('rejects a root .planning symlink that redirects config outside the project', async () => {
+    const { resolveModel } = await import('./config-query.js');
+    const outsideDir = await mkdtemp(join(tmpdir(), 'gsd-resolve-model-root-'));
+    try {
+      await writeFile(join(outsideDir, 'config.json'), JSON.stringify({ model_profile: 'quality' }));
+      await rm(join(tmpDir, '.planning'), { recursive: true, force: true });
+      await symlink(outsideDir, join(tmpDir, '.planning'), 'dir');
+
+      const result = await resolveModel(['gsd-planner'], tmpDir)
+        .then((value) => value, (err: unknown) => err);
+
+      expect(result).toBeInstanceOf(GSDError);
+      expect((result as GSDError).classification).toBe(ErrorClassification.Validation);
+    } finally {
+      await rm(outsideDir, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects a workstream symlink that redirects config outside the project', async () => {
+    const { resolveModel } = await import('./config-query.js');
+    const outsideDir = await mkdtemp(join(tmpdir(), 'gsd-resolve-model-workstream-'));
+    try {
+      await writeFile(join(outsideDir, 'config.json'), JSON.stringify({ model_profile: 'quality' }));
+      await mkdir(join(tmpDir, '.planning', 'workstreams'), { recursive: true });
+      await symlink(outsideDir, join(tmpDir, '.planning', 'workstreams', 'frontend'), 'dir');
+
+      const result = await resolveModel(['gsd-planner'], tmpDir, 'frontend')
+        .then((value) => value, (err: unknown) => err);
+
+      expect(result).toBeInstanceOf(GSDError);
+      expect((result as GSDError).classification).toBe(ErrorClassification.Validation);
+    } finally {
+      await rm(outsideDir, { recursive: true, force: true });
+    }
+  });
 });
 
 // ─── MODEL_PROFILES ─────────────────────────────────────────────────────────
@@ -250,7 +398,7 @@ describe('VALID_PROFILES', () => {
 describe('configGet secret masking (#2997)', () => {
   it('masks the response data for SECRET_CONFIG_KEYS', async () => {
     const { configGet } = await import('./config-query.js');
-    const apiKey = 'BSA-1234567890abcdef';
+    const apiKey = ['BSA', '1234567890abcdef'].join('-');
     await writeFile(
       join(tmpDir, '.planning', 'config.json'),
       JSON.stringify({ brave_search: apiKey }),
@@ -280,14 +428,39 @@ describe('configGet secret masking (#2997)', () => {
     expect(result.data).toBe('****');
   });
 
-  it('does not mask the user-supplied --default value (it is the user\'s own input, not a stored secret)', async () => {
+  it('masks a secret default when the key is absent', async () => {
     const { configGet } = await import('./config-query.js');
     await writeFile(
       join(tmpDir, '.planning', 'config.json'),
       JSON.stringify({ model_profile: 'balanced' }),
     );
-    const result = await configGet(['brave_search', '--default', 'placeholder'], tmpDir);
-    // Default flows through unchanged: the user typed it, the SDK echoed it.
-    expect(result.data).toBe('placeholder');
+    const fakeDefault = 'fake-secret-default';
+
+    const result = await configGet(['brave_search', '--default', fakeDefault], tmpDir);
+
+    expect(result.data).toBe('****ault');
+    expect(result.data).not.toBe(fakeDefault);
+  });
+
+  it('masks a secret default when traversal reaches a non-object', async () => {
+    const { configGet } = await import('./config-query.js');
+    const { SECRET_CONFIG_KEYS } = await import('./secrets.js');
+    const fakeSecretKey = 'fake_secret.nested';
+    const fakeDefault = 'fake-nested-default';
+    const mutableSecretKeys = SECRET_CONFIG_KEYS as Set<string>;
+    mutableSecretKeys.add(fakeSecretKey);
+
+    try {
+      await writeFile(
+        join(tmpDir, '.planning', 'config.json'),
+        JSON.stringify({ fake_secret: null }),
+      );
+      const result = await configGet([fakeSecretKey, '--default', fakeDefault], tmpDir);
+
+      expect(result.data).toBe('****ault');
+      expect(result.data).not.toBe(fakeDefault);
+    } finally {
+      mutableSecretKeys.delete(fakeSecretKey);
+    }
   });
 });

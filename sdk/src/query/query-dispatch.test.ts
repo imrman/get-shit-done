@@ -45,6 +45,78 @@ describe('runQueryDispatch', () => {
     expect(out.exit_code).toBe(0);
   });
 
+  it('consumes --raw and emits config-get scalar output without JSON quotes', async () => {
+    await mkdir(join(tmpDir, '.planning'), { recursive: true });
+    await writeFile(
+      join(tmpDir, '.planning', 'config.json'),
+      JSON.stringify({ model_profile: 'quality' }),
+    );
+    const registry = createRegistry();
+    const out = await runQueryDispatch({
+      registry,
+      projectDir: tmpDir,
+      cjsFallbackEnabled: false,
+      resolveGsdToolsPath: () => '',
+      dispatchNative: async (command, args) => {
+        expect(command).toBe('config-get');
+        expect(args).toEqual(['model_profile']);
+        return registry.dispatch(command, args, tmpDir);
+      },
+      topology: createCommandTopology(registry),
+    }, ['config-get', 'model_profile', '--raw']);
+
+    expect(out.ok).toBe(true);
+    if (!out.ok) throw new Error('expected success');
+    expect(out.stdout).toBe('quality\n');
+  });
+
+  it('consumes --raw and projects resolve-model to the model value', async () => {
+    await mkdir(join(tmpDir, '.planning'), { recursive: true });
+    await writeFile(
+      join(tmpDir, '.planning', 'config.json'),
+      JSON.stringify({ model_profile: 'quality' }),
+    );
+    const registry = createRegistry();
+    const out = await runQueryDispatch({
+      registry,
+      projectDir: tmpDir,
+      cjsFallbackEnabled: false,
+      resolveGsdToolsPath: () => '',
+      dispatchNative: async (command, args) => {
+        expect(command).toBe('resolve-model');
+        expect(args).toEqual(['gsd-planner']);
+        return registry.dispatch(command, args, tmpDir);
+      },
+      topology: createCommandTopology(registry),
+    }, ['resolve-model', 'gsd-planner', '--raw']);
+
+    expect(out.ok).toBe(true);
+    if (!out.ok) throw new Error('expected success');
+    expect(out.stdout).toBe('opus\n');
+  });
+
+  it('preserves config-get and resolve-model JSON output without --raw', async () => {
+    await mkdir(join(tmpDir, '.planning'), { recursive: true });
+    await writeFile(
+      join(tmpDir, '.planning', 'config.json'),
+      JSON.stringify({ model_profile: 'quality' }),
+    );
+    const registry = createRegistry();
+    const deps = {
+      registry,
+      projectDir: tmpDir,
+      cjsFallbackEnabled: false,
+      resolveGsdToolsPath: () => '',
+      topology: createCommandTopology(registry),
+    };
+
+    const config = await runQueryDispatch(deps, ['config-get', 'model_profile']);
+    const model = await runQueryDispatch(deps, ['resolve-model', 'gsd-planner']);
+
+    expect(config.ok && config.stdout).toBe('"quality"\n');
+    expect(model.ok && JSON.parse(model.stdout)).toEqual({ model: 'opus', profile: 'quality' });
+  });
+
   it('applies --pick to native json output', async () => {
     const registry = createRegistry();
     const out = await runQueryDispatch({

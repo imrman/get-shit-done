@@ -9,6 +9,7 @@ import type { CommandTopology, CommandTopologyMatch } from './command-topology.j
 import { unknownCommandError, validationError, fallbackDispatchErrorFromSignal, nativeDispatchErrorFromSignal } from './query-error-taxonomy.js';
 import { canUseCjsFallback } from './query-fallback-policy.js';
 import { toFailureSignal } from '../query-failure-classification.js';
+import { formatQueryRawOutput } from '../query-raw-output-projection.js';
 
 export interface QueryDispatchDeps {
   registry: QueryRegistry;
@@ -40,6 +41,7 @@ export type DispatchSuccessFormat = 'json' | 'text' | undefined;
 export interface DispatchInputValidationResult {
   queryArgs: string[];
   pickField?: string;
+  rawOutput?: boolean;
   error?: QueryDispatchResult;
 }
 
@@ -89,8 +91,17 @@ export function formatSuccess(data: unknown, format: DispatchSuccessFormat, pick
   return `${JSON.stringify(output === undefined ? null : output, null, 2)}\n`;
 }
 
+function formatRawSuccess(command: string, data: unknown, pickField?: string): string {
+  const projection = formatPick(data, pickField ?? (command === 'resolve-model' ? 'model' : undefined));
+  const output = formatQueryRawOutput(command, projection);
+  return output.endsWith('\n') ? output : `${output}\n`;
+}
+
 export function validateQueryDispatchInput(queryArgv: string[]): DispatchInputValidationResult {
   const queryArgs = [...queryArgv];
+  const rawIdx = queryArgs.indexOf('--raw');
+  const rawOutput = rawIdx !== -1;
+  if (rawIdx !== -1) queryArgs.splice(rawIdx, 1);
   const pickIdx = queryArgs.indexOf('--pick');
   if (pickIdx !== -1) {
     if (pickIdx + 1 >= queryArgs.length) {
@@ -113,7 +124,7 @@ export function validateQueryDispatchInput(queryArgv: string[]): DispatchInputVa
         })),
       };
     }
-    return { queryArgs, pickField };
+    return { queryArgs, pickField, rawOutput };
   }
 
   if (queryArgs.length === 0 || !queryArgs[0]) {
@@ -126,7 +137,7 @@ export function validateQueryDispatchInput(queryArgv: string[]): DispatchInputVa
     };
   }
 
-  return { queryArgs };
+  return { queryArgs, rawOutput };
 }
 
 export function planQueryDispatch(
@@ -170,7 +181,7 @@ export async function runQueryDispatch(deps: QueryDispatchDeps, queryArgv: strin
   const validated = validateQueryDispatchInput(queryArgv);
   if (validated.error) return validated.error;
 
-  const { queryArgs, pickField } = validated;
+  const { queryArgs, pickField, rawOutput } = validated;
 
   const plan = planQueryDispatch(queryArgs, deps.topology, deps.cjsFallbackEnabled);
   const normCmd = plan.normalized.command;
@@ -197,7 +208,7 @@ export async function runQueryDispatch(deps: QueryDispatchDeps, queryArgv: strin
           projectDir: deps.projectDir,
           gsdToolsPath: gsdPath,
           normCmd,
-          normArgs,
+          normArgs: rawOutput ? [...normArgs, '--raw'] : normArgs,
           ws: deps.ws,
           pickField,
         });
@@ -236,7 +247,11 @@ export async function runQueryDispatch(deps: QueryDispatchDeps, queryArgv: strin
     const result = dispatchNative
       ? await dispatchNative(matched.canonical, matched.args)
       : await matched.adapter(matched.args, deps.projectDir, deps.ws);
-    return dispatchSuccess(formatSuccess(result.data, result.format, pickField));
+    return dispatchSuccess(
+      rawOutput
+        ? formatRawSuccess(matched.canonical, result.data, pickField)
+        : formatSuccess(result.data, result.format, pickField),
+    );
   } catch (e) {
     return toDispatchFailure(mapNativeDispatchError(e, matched.canonical, matched.args));
   }
