@@ -12,6 +12,14 @@ on:
       - 'release/**'
       - 'hotfix/**'
   workflow_dispatch:
+    inputs:
+      trusted_scanner_ref:
+        description: 'Current default-branch full 40-character commit SHA for scanner scripts'
+        required: true
+        type: string
+
+permissions:
+  contents: read
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
@@ -23,12 +31,103 @@ jobs:
     timeout-minutes: 5
 
     steps:
-      - name: Checkout
+      - name: Checkout scan target
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
         with:
+          persist-credentials: false
           fetch-depth: 0
+          path: scan-target
+
+      - name: Resolve trusted scanner source
+        id: trusted-scanner-source
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          DEFAULT_REPOSITORY: ${{ github.repository }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          PR_BASE_REPOSITORY: ${{ github.event.pull_request.base.repo.full_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PUSH_BEFORE_SHA: ${{ github.event.before }}
+          DISPATCH_TRUSTED_SCANNER_REF: ${{ inputs.trusted_scanner_ref }}
+        run: |
+          ZERO_SHA='0000000000000000000000000000000000000000'
+
+          is_commit_sha() {
+            printf '%s' "$1" | grep -Eq '^[0-9a-fA-F]{40}$'
+          }
+
+          trusted_git() {
+            GIT_CONFIG_COUNT=0 GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_PARAMETERS= \
+              GIT_CONFIG_SYSTEM=/dev/null GIT_CONFIG_NOSYSTEM=1 GIT_NO_REPLACE_OBJECTS=1 \
+              git "$@"
+          }
+
+          validate_ref_name() {
+            printf '%s' "$1" | grep -Eq '^[A-Za-z0-9._/@+-]+$'
+          }
+
+          TRUSTED_SCANNER_REPOSITORY="$DEFAULT_REPOSITORY"
+          TRUSTED_SCANNER_REF=''
+
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            if [ -z "$PR_BASE_REPOSITORY" ] || ! is_commit_sha "$PR_BASE_SHA"; then
+              echo "Missing valid pull request base repository or SHA" >&2
+              exit 1
+            fi
+            TRUSTED_SCANNER_REPOSITORY="$PR_BASE_REPOSITORY"
+            TRUSTED_SCANNER_REF="$PR_BASE_SHA"
+          elif [ "$EVENT_NAME" = "push" ]; then
+            if is_commit_sha "$PUSH_BEFORE_SHA" && [ "$PUSH_BEFORE_SHA" != "$ZERO_SHA" ]; then
+              TRUSTED_SCANNER_REF="$PUSH_BEFORE_SHA"
+            else
+              echo "Push runs require a non-zero before SHA for trusted scanner source" >&2
+              exit 1
+            fi
+          elif [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            if [ -z "$DISPATCH_TRUSTED_SCANNER_REF" ]; then
+              echo "workflow_dispatch requires trusted_scanner_ref for trusted scanner source" >&2
+              exit 1
+            fi
+            if ! is_commit_sha "$DISPATCH_TRUSTED_SCANNER_REF"; then
+              echo "workflow_dispatch trusted_scanner_ref must be a full 40-character commit SHA" >&2
+              exit 1
+            fi
+            if [ -z "$DEFAULT_BRANCH" ] || ! validate_ref_name "$DEFAULT_BRANCH"; then
+              echo "workflow_dispatch requires a valid trusted repository default branch" >&2
+              exit 1
+            fi
+            trusted_git -C scan-target fetch --no-tags --force \
+              "https://github.com/${DEFAULT_REPOSITORY}.git" \
+              "refs/heads/${DEFAULT_BRANCH}"
+            TRUSTED_REPOSITORY_REF="$(trusted_git -C scan-target rev-parse FETCH_HEAD)"
+            if [ "$DISPATCH_TRUSTED_SCANNER_REF" != "$TRUSTED_REPOSITORY_REF" ]; then
+              echo "workflow_dispatch trusted_scanner_ref must exactly match the current trusted repository default branch commit" >&2
+              exit 1
+            fi
+            TRUSTED_SCANNER_REF="$TRUSTED_REPOSITORY_REF"
+          else
+            echo "Unsupported event for trusted scanner source: $EVENT_NAME" >&2
+            exit 1
+          fi
+
+          if [ -z "$TRUSTED_SCANNER_REPOSITORY" ] || ! validate_ref_name "$TRUSTED_SCANNER_REF"; then
+            echo "Invalid trusted scanner source" >&2
+            exit 1
+          fi
+
+          printf 'repository=%s\n' "$TRUSTED_SCANNER_REPOSITORY" >> "$GITHUB_OUTPUT"
+          printf 'ref=%s\n' "$TRUSTED_SCANNER_REF" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout trusted scanner source
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+          path: trusted-scanners
+          repository: ${{ steps.trusted-scanner-source.outputs.repository }}
+          ref: ${{ steps.trusted-scanner-source.outputs.ref }}
 
       - name: Resolve scan base
+        working-directory: scan-target
         env:
           EVENT_NAME: ${{ github.event_name }}
           PR_BASE_REF: ${{ github.base_ref }}
@@ -57,30 +156,36 @@ jobs:
           echo "security-scan: using base $SCAN_BASE"
 
       - name: Prompt injection scan
+        working-directory: scan-target
         run: |
-          chmod +x scripts/prompt-injection-scan.sh
-          scripts/prompt-injection-scan.sh --diff "$GSD_SCAN_BASE"
+          chmod +x ../trusted-scanners/scripts/prompt-injection-scan.sh
+          ../trusted-scanners/scripts/prompt-injection-scan.sh --diff "$GSD_SCAN_BASE"
 
       - name: Base64 obfuscation scan
+        working-directory: scan-target
         run: |
-          chmod +x scripts/base64-scan.sh
-          scripts/base64-scan.sh --diff "$GSD_SCAN_BASE"
+          chmod +x ../trusted-scanners/scripts/base64-scan.sh
+          ../trusted-scanners/scripts/base64-scan.sh --diff "$GSD_SCAN_BASE"
 
       - name: Secret scan
+        working-directory: scan-target
         run: |
-          chmod +x scripts/secret-scan.sh
-          scripts/secret-scan.sh --diff "$GSD_SCAN_BASE"
+          chmod +x ../trusted-scanners/scripts/secret-scan.sh
+          ../trusted-scanners/scripts/secret-scan.sh --diff "$GSD_SCAN_BASE"
 
       - name: Planning directory check
+        working-directory: scan-target
         run: |
           # Ensure .planning/ runtime data is not committed in PRs
           # (The GSD repo itself has .planning/ in .gitignore, but PRs
           # from forks or misconfigured clones might include it)
-          PLANNING_FILES=$(git diff --name-only --diff-filter=ACMR "$GSD_SCAN_BASE"...HEAD | grep '^\.planning/' || true)
-          if [ -n "$PLANNING_FILES" ]; then
+          PLANNING_FILE_COUNT=$(
+            git diff --name-only -z --diff-filter=ACMR "$GSD_SCAN_BASE"...HEAD |
+              awk 'BEGIN { RS="\0" } /^\.planning\// { count += 1 } END { print count + 0 }'
+          )
+          if [ "$PLANNING_FILE_COUNT" != "0" ]; then
             echo "FAIL: .planning/ runtime data must not be committed to PRs"
-            echo "The following .planning/ files were found in this PR:"
-            echo "$PLANNING_FILES"
+            echo "$PLANNING_FILE_COUNT .planning/ runtime data files were found in this PR."
             echo ""
             echo "Add .planning/ to your .gitignore and remove these files from the commit."
             exit 1

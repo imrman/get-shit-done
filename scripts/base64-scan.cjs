@@ -6,7 +6,10 @@ const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 
 const MIN_BLOB_LENGTH = 40;
-const MAX_BLOB_LENGTH = 8192;
+const MAX_DECODE_DEPTH = 3;
+const MAX_FRAGMENT_GAP_LINES = 16;
+const MAX_RECONSTRUCTED_FRAGMENTS = 128;
+const MAX_RECONSTRUCTED_BLOB_LENGTH = 65536;
 const IGNORE_FILE = '.base64scanignore';
 
 const decodedPatterns = [
@@ -28,6 +31,16 @@ const decodedPatterns = [
   /rm\s+-rf/i,
   /curl\s+.*\|\s*sh/i,
   /wget\s+.*\|\s*sh/i,
+  /AKIA[0-9A-Z]{16}/,
+  /sk-proj-[A-Za-z0-9_-]{20,}/,
+  /sk-ant-[A-Za-z0-9_-]{20,}/,
+  /sk-[A-Za-z0-9]{20,}/,
+  /(?:ghp_|gho_|ghs_|ghu_|ghr_)[A-Za-z0-9]{36}/,
+  /github_pat_[A-Za-z0-9_]{20,}/,
+  /s[pk]_live_[A-Za-z0-9]{24,}/,
+  /xoxb-[0-9]{10,}-[A-Za-z0-9]{20,}/,
+  /AIza[A-Za-z0-9_-]{35}/,
+  /npm_[A-Za-z0-9]{36}/,
 ];
 
 function usage() {
@@ -35,21 +48,54 @@ function usage() {
   process.exit(2);
 }
 
-function loadIgnorelist() {
-  if (!fs.existsSync(IGNORE_FILE)) return new Set();
-  const lines = fs.readFileSync(IGNORE_FILE, 'utf8').split(/\r?\n/);
+function loadIgnorelist(trustedBase) {
+  let content = '';
+  if (trustedBase) {
+    try {
+      content = execFileSync('git', ['show', `${trustedBase}:${IGNORE_FILE}`], {
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'ignore'],
+      });
+    } catch {
+      content = '';
+    }
+  } else if (fs.existsSync(IGNORE_FILE)) {
+    content = fs.readFileSync(IGNORE_FILE, 'utf8');
+  }
+  if (!content) return new Set();
+  const lines = content.split(/\r?\n/);
   return new Set(lines.map((line) => line.trim()).filter((line) => line && !line.startsWith('#')));
 }
 
-function shouldSkipFile(file) {
+function shouldSkipFile(file, mode) {
   if (/(^|\/)node_modules\//.test(file)) return true;
   if (/(^|\/)package-lock\.json$/.test(file)) return true;
   if (/(^|\/)yarn\.lock$/.test(file)) return true;
   if (/(^|\/)pnpm-lock\.yaml$/.test(file)) return true;
-  if (/(^|\/)base64-scan\.sh$/.test(file)) return true;
-  if (/(^|\/)base64-scan\.cjs$/.test(file)) return true;
-  if (/(^|\/)security-scan\.test\.cjs$/.test(file)) return true;
+  if (mode !== '--diff' && /(^|\/)base64-scan\.sh$/.test(file)) return true;
+  if (mode !== '--diff' && /(^|\/)base64-scan\.cjs$/.test(file)) return true;
+  if (mode !== '--diff' && isRepoSecurityScanTest(file)) return true;
   return /\.(png|jpe?g|gif|ico|woff2?|ttf|eot|otf|zip|tar|gz|bz2|xz|7z|pdf|docx?|xlsx?)$/i.test(file);
+}
+
+function normalizePathForMatching(file) {
+  return file.split(path.sep).join('/').replace(/^\.\//u, '');
+}
+
+function isRepoSecurityScanTest(file) {
+  const normalized = normalizePathForMatching(file);
+  if (normalized === 'tests/security-scan.test.cjs') return true;
+  return normalizePathForMatching(path.resolve(file)) === normalizePathForMatching(path.join(process.cwd(), 'tests/security-scan.test.cjs'));
+}
+
+function sanitizeFileId(file) {
+  return path.basename(String(file).replace(/\\/gu, '/'))
+    .replace(/[\r\n\t]+/gu, ' ')
+    .replace(
+      /(^|[^A-Za-z0-9])(customer|secret|token|password|passwd|credentials?|private|api[-_]?key|access[-_]?key)(?=[^A-Za-z0-9]|$)/giu,
+      '$1[redacted]'
+    )
+    .replace(/AKIA[0-9A-Z]{16}|sk-ant-[A-Za-z0-9_-]{20,}|sk-proj-[A-Za-z0-9_-]{20,}|sk-[A-Za-z0-9]{20,}|(?:ghp_|gho_|ghs_|ghu_|ghr_)[A-Za-z0-9]{36}|github_pat_[A-Za-z0-9_]{20,}|s[pk]_live_[A-Za-z0-9]{24,}|xoxb-[0-9]{10,}-[A-Za-z0-9]{20,}|AIza[A-Za-z0-9_-]{35}|npm_[A-Za-z0-9]{36}/gu, '[redacted]');
 }
 
 function walk(dir, out = []) {
@@ -66,18 +112,62 @@ function walk(dir, out = []) {
   return out;
 }
 
+function isReadableFile(file) {
+  try {
+    if (!fs.statSync(file).isFile()) return false;
+    fs.accessSync(file, fs.constants.R_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function rejectsNewlinePathFragments(files) {
+  for (let start = 0; start < files.length; start += 1) {
+    let candidate = files[start];
+    for (let end = start + 1; end < files.length; end += 1) {
+      candidate += `\n${files[end]}`;
+      if (isReadableFile(candidate)) return true;
+    }
+  }
+  return false;
+}
+
+function gitNulPaths(args, errorMessage) {
+  try {
+    return execFileSync('git', args, { stdio: ['ignore', 'pipe', 'ignore'] })
+      .toString('utf8')
+      .split('\0')
+      .filter(Boolean);
+  } catch {
+    process.stderr.write(`${errorMessage}\n`);
+    process.exit(2);
+  }
+}
+
+function collectDiffFiles(base) {
+  const seen = new Set();
+  const files = [];
+  const addFiles = (candidates) => {
+    for (const file of candidates) {
+      if (seen.has(file)) continue;
+      seen.add(file);
+      files.push(file);
+    }
+  };
+
+  addFiles(gitNulPaths(['diff', '-z', '--name-only', '--diff-filter=ACMR', `${base}...HEAD`], `Error: git diff failed for base: ${base}`));
+  addFiles(gitNulPaths(['diff', '-z', '--name-only', '--cached', '--diff-filter=ACMR'], 'Error: git staged diff failed'));
+  addFiles(gitNulPaths(['diff', '-z', '--name-only', '--diff-filter=ACMR'], 'Error: git unstaged diff failed'));
+  addFiles(gitNulPaths(['ls-files', '-z', '--others', '--exclude-standard'], 'Error: git untracked file listing failed'));
+  return files;
+}
+
 function collectFiles(argv) {
   const mode = argv[0];
   if (mode === '--diff') {
     const base = argv[1] || 'origin/main';
-    try {
-      return execFileSync('git', ['diff', '--name-only', '--diff-filter=ACMR', `${base}...HEAD`], {
-        encoding: 'utf8',
-        stdio: ['ignore', 'pipe', 'ignore'],
-      }).split(/\r?\n/).filter(Boolean);
-    } catch {
-      return [];
-    }
+    return collectDiffFiles(base);
   }
   if (mode === '--file') {
     const file = argv[1];
@@ -92,7 +182,16 @@ function collectFiles(argv) {
     process.exit(2);
   }
   if (mode === '--stdin') {
-    return fs.readFileSync(0, 'utf8').split(/\r?\n/).filter(Boolean);
+    const files = fs.readFileSync(0, 'utf8').split(/\r?\n/).filter(Boolean);
+    if (rejectsNewlinePathFragments(files)) {
+      process.stderr.write('Error: stdin path stream cannot represent newline-containing paths\n');
+      process.exit(2);
+    }
+    if (files.some((file) => !isReadableFile(file))) {
+      process.stderr.write('Error: stdin path is not readable\n');
+      process.exit(2);
+    }
+    return files;
   }
   usage();
 }
@@ -106,15 +205,76 @@ function isMostlyPrintable(buffer) {
   return (printable * 100 / buffer.length) >= 70;
 }
 
+function toStandardBase64(blob) {
+  return blob.replace(/-/gu, '+').replace(/_/gu, '/');
+}
+
 function isCanonicalBase64(blob, decoded) {
-  return decoded.toString('base64').replace(/=+$/u, '') === blob.replace(/=+$/u, '');
+  return decoded.toString('base64').replace(/=+$/u, '') === toStandardBase64(blob).replace(/=+$/u, '');
+}
+
+function normalizeBase64Candidate(blob) {
+  const standardBlob = toStandardBase64(blob);
+  const remainder = standardBlob.length % 4;
+  if (remainder === 1) return '';
+  return remainder === 0 ? standardBlob : standardBlob + '='.repeat(4 - remainder);
 }
 
 function shouldDecodeCandidate(blob, line) {
-  if (blob.length < MIN_BLOB_LENGTH || blob.length > MAX_BLOB_LENGTH) return false;
-  if (blob.length % 4 !== 0) return false;
-  if (!/[+/=]/u.test(blob) && !/(base64|encoded|payload|blob|secret|token|data|["'`:={}])/iu.test(line)) return false;
+  if (blob.length < MIN_BLOB_LENGTH) return false;
+  if (blob.length % 4 === 1) return false;
+  if (!/[+/=_-]/u.test(blob) && line.trim() !== blob && !/(base64|encoded|payload|blob|secret|token|data|["'`:={}])/iu.test(line)) return false;
   return true;
+}
+
+function lineNumberAtOffset(content, offset) {
+  let line = 1;
+  for (let index = 0; index < offset; index += 1) {
+    if (content.charCodeAt(index) === 10) line += 1;
+  }
+  return line;
+}
+
+function quotedFragmentCandidates(content) {
+  const candidates = [];
+  const quotedRun = /(["'`][A-Za-z0-9+/_-]{1,}={0,3}["'`])(?:\s*[+,]?\s*["'`][A-Za-z0-9+/_-]{1,}={0,3}["'`])+/gu;
+  for (const match of content.matchAll(quotedRun)) {
+    const blob = [...match[0].matchAll(/["'`]([A-Za-z0-9+/_-]{1,}={0,3})["'`]/gu)]
+      .map((fragment) => fragment[1])
+      .join('');
+    candidates.push({ blob, lineNumber: lineNumberAtOffset(content, match.index || 0), context: match[0] });
+  }
+  return candidates;
+}
+
+function assignmentFragmentCandidates(content) {
+  const fragments = [];
+  const lines = content.split(/\r?\n/u);
+  const assignment = /(?:^|[;,]\s*)(?:(?:const|let|var)\s+)?[A-Za-z_$][\w$]*\s*=\s*(["'`])([A-Za-z0-9+/_-]{1,}={0,3})\1/gu;
+
+  for (let index = 0; index < lines.length; index += 1) {
+    for (const match of lines[index].matchAll(assignment)) {
+      fragments.push({ value: match[2], lineNumber: index + 1 });
+    }
+  }
+
+  const candidates = [];
+  for (let start = 0; start < fragments.length; start += 1) {
+    let blob = '';
+    for (let end = start; end < fragments.length && end < start + MAX_RECONSTRUCTED_FRAGMENTS; end += 1) {
+      if (fragments[end].lineNumber - fragments[start].lineNumber > MAX_FRAGMENT_GAP_LINES) break;
+      blob += fragments[end].value;
+      if (blob.length > MAX_RECONSTRUCTED_BLOB_LENGTH) break;
+      if (end > start) {
+        candidates.push({
+          blob,
+          lineNumber: fragments[start].lineNumber,
+          context: 'base64 assignment fragments',
+        });
+      }
+    }
+  }
+  return candidates;
 }
 
 function scanFile(file, ignored) {
@@ -126,40 +286,61 @@ function scanFile(file, ignored) {
   }
 
   let found = false;
+  const seenBlobs = new Set();
+  const checkCandidate = (blob, lineNumber, context) => {
+    if (seenBlobs.has(`${lineNumber}:${blob}`)) return false;
+    seenBlobs.add(`${lineNumber}:${blob}`);
+    if (ignored.has(blob) || !shouldDecodeCandidate(blob, context)) return false;
+
+    let currentBlob = blob;
+    for (let depth = 0; depth < MAX_DECODE_DEPTH; depth += 1) {
+      const normalizedBlob = normalizeBase64Candidate(currentBlob);
+      if (!normalizedBlob) return false;
+      const decoded = Buffer.from(normalizedBlob, 'base64');
+      if (!isCanonicalBase64(currentBlob, decoded) || !isMostlyPrintable(decoded)) return false;
+      const decodedText = decoded.toString('utf8');
+      const pattern = decodedPatterns.find((candidate) => candidate.test(decodedText));
+
+      if (pattern) {
+        if (!found) {
+          process.stdout.write(`FAIL: ${sanitizeFileId(file)}\n`);
+          found = true;
+        }
+        process.stdout.write(`  line ${lineNumber}: base64 blob decodes to suspicious content\n`);
+        process.stdout.write(`    matched: ${pattern.source}\n`);
+        return true;
+      }
+
+      if (!/^[A-Za-z0-9+/_-]{40,}={0,3}$/u.test(decodedText)) return false;
+      currentBlob = decodedText;
+    }
+    return false;
+  };
+
   const lines = content.split(/\r?\n/);
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index];
-    if (/data:[a-zA-Z]+\/[a-zA-Z0-9.+-]+;base64,/u.test(line)) continue;
+    const scanLine = line;
 
-    for (const match of line.matchAll(/[A-Za-z0-9+/]{40,}={0,3}/gu)) {
-      const blob = match[0];
-      if (ignored.has(blob) || !shouldDecodeCandidate(blob, line)) continue;
-
-      const decoded = Buffer.from(blob, 'base64');
-      if (!isCanonicalBase64(blob, decoded) || !isMostlyPrintable(decoded)) continue;
-      const decodedText = decoded.toString('utf8');
-
-      const pattern = decodedPatterns.find((candidate) => candidate.test(decodedText));
-      if (!pattern) continue;
-
-      if (!found) {
-        process.stdout.write(`FAIL: ${file}\n`);
-        found = true;
-      }
-      process.stdout.write(`  line ${index + 1}: base64 blob decodes to suspicious content\n`);
-      process.stdout.write(`    blob: ${blob.slice(0, 60)}...\n`);
-      process.stdout.write(`    decoded: ${decodedText.slice(0, 120)}\n`);
-      process.stdout.write(`    matched: ${pattern.source}\n`);
-      break;
+    for (const match of scanLine.matchAll(/[A-Za-z0-9+/_-]{40,}={0,3}/gu)) {
+      if (checkCandidate(match[0], index + 1, scanLine)) break;
     }
+  }
+  for (const candidate of quotedFragmentCandidates(content)) {
+    checkCandidate(candidate.blob, candidate.lineNumber, candidate.context);
+  }
+  for (const candidate of assignmentFragmentCandidates(content)) {
+    checkCandidate(candidate.blob, candidate.lineNumber, candidate.context);
   }
   return found;
 }
 
 function main() {
   if (process.argv.length <= 2) usage();
-  const ignored = loadIgnorelist();
-  const files = collectFiles(process.argv.slice(2));
+  const argv = process.argv.slice(2);
+  const trustedBase = argv[0] === '--diff' ? (argv[1] || 'origin/main') : '';
+  const ignored = loadIgnorelist(trustedBase);
+  const files = collectFiles(argv);
 
   if (files.length === 0) {
     process.stdout.write('base64-scan: no files to scan\n');
@@ -169,7 +350,7 @@ function main() {
   let total = 0;
   let failed = 0;
   for (const file of files) {
-    if (!file || shouldSkipFile(file)) continue;
+    if (!file || shouldSkipFile(file, argv[0])) continue;
     total += 1;
     if (scanFile(file, ignored)) failed += 1;
   }
