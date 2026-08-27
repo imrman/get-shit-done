@@ -83,6 +83,32 @@ describe('hardened upstream sync workflow release policy', () => {
     assert.match(validateJob, /printf 'eligible_for_promotion=%s\\n' "\$eligible_for_promotion" >> "\$GITHUB_OUTPUT"/);
   });
 
+  test('reports a trusted merge conflict without making it eligible for downstream release jobs', () => {
+    const workflow = fs.readFileSync(WORKFLOW_PATH, 'utf8');
+    const validateJob = namedJobBlock(workflow, 'validate');
+
+    assert.match(
+      validateJob,
+      /"4:SYNC_OUTCOME=BLOCKED_CONFLICT"\)[\s\S]*sync_outcome="BLOCKED_CONFLICT"[\s\S]*;;/
+    );
+    assert.match(validateJob, /eligible_for_promotion="false"/, 'conflicts must retain the fail-closed default');
+    assert.match(
+      validateJob,
+      /::error::Upstream synchronization is not eligible for promotion: \$\{SYNC_OUTCOME\}/,
+      'the conflict outcome must be visible in the failed validation job'
+    );
+
+    for (const jobName of ['attest', 'promote']) {
+      assert.match(
+        namedJobBlock(workflow, jobName),
+        /if:\s*needs\.validate\.outputs\.eligible_for_promotion == 'true'/,
+        `${jobName} must stay closed for a conflict outcome`
+      );
+    }
+    assert.match(namedJobBlock(workflow, 'package_secure_codex'), /needs:\s*promote/);
+    assert.match(namedJobBlock(workflow, 'sign_secure_codex'), /needs:\s*\[promote, package_secure_codex\]/);
+  });
+
   test('uses one trusted direct-child outcome file and validates that it contains exactly one line', () => {
     const workflow = fs.readFileSync(WORKFLOW_PATH, 'utf8');
     const validateJob = namedJobBlock(workflow, 'validate');

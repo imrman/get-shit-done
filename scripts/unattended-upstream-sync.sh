@@ -96,6 +96,10 @@ Environment:
   GSD_SYNC_PRESERVE_PATHS Newline-separated paths to preserve from origin/main
   GSD_SYNC_MIN_SKILLS     Minimum expected gsd-* Codex skills after install (default: 50)
   RUNNER_TEMP             Trusted parent directory required by --outcome-file
+
+Exit 4 with SYNC_OUTCOME=BLOCKED_CONFLICT means origin and upstream touched
+the same path, or Git reported an unresolved merge conflict. No candidate is
+validated, promoted, pushed, or installed in that case.
 EOF
 }
 
@@ -388,6 +392,8 @@ CANDIDATE_VALIDATION_GIT_CONFIG_GLOBAL="${CANDIDATE_VALIDATION_GIT_CONFIG_GLOBAL
 CANDIDATE_VALIDATION_HOME="${CANDIDATE_VALIDATION_HOME:-}"
 CLEANED=0
 PRESERVE_PATHS=()
+CONFLICT_PATHS=("")
+CONFLICT_COUNT=0
 
 cleanup_git_credentials_in_repo() {
   local repo_dir="$1"
@@ -871,6 +877,69 @@ emit_sync_outcome() {
   log "$summary origin_sha=$origin_sha upstream_ref=$UPSTREAM_REF upstream_sha=$upstream_sha candidate_tree_sha=$candidate_tree_sha"
 }
 
+emit_conflict_outcome() {
+  local conflict_path
+  local quoted_path
+
+  write_sync_outcome "BLOCKED_CONFLICT"
+  log "SYNC_OUTCOME=BLOCKED_CONFLICT origin_sha=$origin_sha upstream_ref=$UPSTREAM_REF upstream_sha=$upstream_sha conflict_count=$CONFLICT_COUNT"
+  for conflict_path in "${CONFLICT_PATHS[@]}"; do
+    if [ -z "$conflict_path" ]; then
+      continue
+    fi
+    printf -v quoted_path '%q' "$conflict_path"
+    log "CONFLICT_PATH=$quoted_path"
+  done
+}
+
+find_overlapping_paths() {
+  local candidate_base_sha="$1"
+  local merge_base
+  local origin_path
+  local upstream_path
+  local -a origin_paths=("")
+  local -a upstream_paths=("")
+
+  merge_base="$(trusted_git -C "$REPO_DIR" merge-base "$candidate_base_sha" "$upstream_sha")" ||
+    fail "Unable to determine the origin/upstream merge base"
+
+  while IFS= read -r -d '' origin_path; do
+    origin_paths+=("$origin_path")
+  done < <(trusted_git -C "$REPO_DIR" diff --no-renames --name-only -z "$merge_base" "$candidate_base_sha" --)
+  while IFS= read -r -d '' upstream_path; do
+    upstream_paths+=("$upstream_path")
+  done < <(trusted_git -C "$REPO_DIR" diff --no-renames --name-only -z "$merge_base" "$upstream_sha" --)
+
+  CONFLICT_PATHS=("")
+  CONFLICT_COUNT=0
+  for origin_path in "${origin_paths[@]}"; do
+    if [ -z "$origin_path" ]; then
+      continue
+    fi
+    for upstream_path in "${upstream_paths[@]}"; do
+      if [ -z "$upstream_path" ]; then
+        continue
+      fi
+      if [ "$origin_path" = "$upstream_path" ]; then
+        CONFLICT_PATHS+=("$origin_path")
+        CONFLICT_COUNT=$((CONFLICT_COUNT + 1))
+        break
+      fi
+    done
+  done
+}
+
+collect_unmerged_paths() {
+  local conflict_path
+
+  CONFLICT_PATHS=("")
+  CONFLICT_COUNT=0
+  while IFS= read -r -d '' conflict_path; do
+    CONFLICT_PATHS+=("$conflict_path")
+    CONFLICT_COUNT=$((CONFLICT_COUNT + 1))
+  done < <(trusted_git -C "$SYNC_WORKTREE" diff --name-only --diff-filter=U -z)
+}
+
 assert_preserved_restore_path_safe() {
   local preserved_path="$1"
   local physical_root
@@ -956,48 +1025,6 @@ remove_candidate_npm_configs() {
   while IFS= read -r -d '' npm_config_path; do
     rm -f -- "$npm_config_path"
   done < <(find "$SYNC_WORKTREE" -name .npmrc -print0)
-}
-
-resolve_preserved_conflicts_or_fail() {
-  local conflicts=()
-  local conflict
-  while IFS= read -r conflict; do
-    conflicts+=("$conflict")
-  done < <(git -C "$SYNC_WORKTREE" diff --name-only --diff-filter=U)
-
-  if [ "${#conflicts[@]}" -eq 0 ]; then
-    return 1
-  fi
-
-  for conflict in "${conflicts[@]}"; do
-    if [ "$conflict" = "package.json" ]; then
-      resolve_package_json_conflict
-    elif is_preserved_path "$conflict"; then
-      restore_path_from_base "$conflict"
-    else
-      resolve_non_preserved_conflict_from_upstream "$conflict"
-    fi
-  done
-  git -C "$SYNC_WORKTREE" add -A
-}
-
-resolve_non_preserved_conflict_from_upstream() {
-  local conflict="$1"
-
-  log "Resolving non-preserved merge conflict from upstream: $conflict"
-  if git -C "$SYNC_WORKTREE" cat-file -e ":3:${conflict}" 2>/dev/null; then
-    git -C "$SYNC_WORKTREE" checkout --theirs -- "$conflict"
-    git -C "$SYNC_WORKTREE" add -- "$conflict"
-  else
-    git -C "$SYNC_WORKTREE" rm -r --ignore-unmatch -- "$conflict" >/dev/null 2>&1 || true
-  fi
-}
-
-resolve_package_json_conflict() {
-  log "Resolving package.json conflict by taking upstream package data and preserving trusted scripts"
-  git -C "$SYNC_WORKTREE" checkout --theirs -- package.json
-  preserve_package_json_sync_scripts
-  git -C "$SYNC_WORKTREE" add package.json
 }
 
 preserve_package_json_sync_scripts() {
@@ -1355,9 +1382,23 @@ if ! trusted_git -C "$SYNC_WORKTREE" -c core.hooksPath=/dev/null merge --ff-only
 fi
 
 log "Merging upstream candidate $upstream_sha into temporary candidate"
-log "Using upstream-preferred merge resolution for non-preserved paths; hardened preserve paths are restored after merge"
-if ! trusted_git -C "$SYNC_WORKTREE" -c core.hooksPath=/dev/null merge --no-ff --no-edit --no-commit -X theirs "$upstream_sha"; then
-  resolve_preserved_conflicts_or_fail
+candidate_base_sha="$(trusted_git -C "$SYNC_WORKTREE" rev-parse HEAD)"
+find_overlapping_paths "$candidate_base_sha"
+if [ "$CONFLICT_COUNT" -gt 0 ]; then
+  emit_conflict_outcome
+  log "Origin and upstream overlap; ${BASE_BRANCH} remains unchanged and requires manual reconciliation"
+  exit 4
+fi
+log "No origin/upstream path overlap detected; attempting a standard merge"
+if ! trusted_git -C "$SYNC_WORKTREE" -c core.hooksPath=/dev/null merge --no-ff --no-edit --no-commit "$upstream_sha"; then
+  collect_unmerged_paths
+  if [ "$CONFLICT_COUNT" -gt 0 ]; then
+    emit_conflict_outcome
+    trusted_git -C "$SYNC_WORKTREE" -c core.hooksPath=/dev/null merge --abort >/dev/null 2>&1 || true
+    log "Git reported unresolved conflicts; ${BASE_BRANCH} remains unchanged and requires manual reconciliation"
+    exit 4
+  fi
+  fail "Upstream merge failed before candidate validation"
 fi
 
 restore_preserved_paths

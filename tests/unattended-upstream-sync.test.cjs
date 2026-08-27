@@ -404,7 +404,7 @@ const timer = setInterval(() => {
       for (const child of fs.readdirSync(parentPath, { withFileTypes: true })) {
         if (!child.isDirectory()) continue;
         const pushClone = path.join(parentPath, child.name);
-        if (configured.has(pushClone) || !fs.existsSync(path.join(pushClone, '.git'))) continue;
+        if (configured.has(pushClone) || !fs.existsSync(path.join(pushClone, '.git', 'index'))) continue;
         execFileSync('git', [
           'config',
           '--local',
@@ -673,6 +673,8 @@ function setupRepos({ testExit = 0, testOutput = '' } = {}) {
   const installLog = path.join(sandbox, 'install.log');
   const home = path.join(sandbox, 'home');
   const codexHome = path.join(home, '.codex');
+  const tmpDir = path.join(sandbox, 'tmp');
+  fs.mkdirSync(tmpDir);
 
   git(['init', '-b', 'main', seed], sandbox);
   configureRepo(seed);
@@ -699,7 +701,7 @@ function setupRepos({ testExit = 0, testOutput = '' } = {}) {
   commitAll(upstreamWork, 'upstream change');
   git(['push', 'origin', 'HEAD:main'], upstreamWork);
 
-  return { codexHome, home, installLog, originBare, runner, upstreamBare, upstreamWork, validationLog };
+  return { codexHome, home, installLog, originBare, runner, tmpDir, upstreamBare, upstreamWork, validationLog };
 }
 
 function runScript(fixture, extraArgs = [], extraEnv = {}) {
@@ -720,6 +722,7 @@ function runScript(fixture, extraArgs = [], extraEnv = {}) {
       HOME: fixture.home,
       GSD_SYNC_MIN_SKILLS: '2',
       INSTALL_LOG: fixture.installLog,
+      TMPDIR: fixture.tmpDir,
       VALIDATION_LOG: fixture.validationLog,
       ...extraEnv,
     },
@@ -787,6 +790,13 @@ function existsInBare(repoPath, ref, filePath) {
 }
 
 describe('unattended upstream sync script', () => {
+  test('never uses automatic theirs conflict resolution', () => {
+    const script = fs.readFileSync(SCRIPT_PATH, 'utf8');
+
+    assert.doesNotMatch(script, /merge[^\n]*-X\s+theirs/);
+    assert.doesNotMatch(script, /checkout\s+--theirs/);
+  });
+
   test('syncs upstream changes, preserves hardened fork files, validates, pushes, and skips local install by default', () => {
     const fixture = setupRepos();
 
@@ -806,6 +816,29 @@ describe('unattended upstream sync script', () => {
     assert.equal(fs.existsSync(path.join(fixture.codexHome, 'get-shit-done', 'VERSION')), false);
   });
 
+  test('blocks an overlapping hardened path with an exact machine-readable conflict outcome', () => {
+    const fixture = setupRepos();
+    const runnerTemp = createTempDir('unattended-upstream-sync-runner-');
+    const outcomeFile = path.join(runnerTemp, 'sync.outcome');
+    writeFile(fixture.runner, 'SECURITY.md', 'origin revised hardened security\n');
+    commitAll(fixture.runner, 'revise hardened security');
+    git(['push', 'origin', 'HEAD:main'], fixture.runner);
+
+    const result = runScript(
+      fixture,
+      ['--outcome-file', outcomeFile],
+      { RUNNER_TEMP: runnerTemp }
+    );
+
+    assert.equal(result.status, 4, result.stderr || result.stdout);
+    assert.equal(fs.readFileSync(outcomeFile, 'utf8'), 'SYNC_OUTCOME=BLOCKED_CONFLICT\n');
+    assert.match(result.stdout, /CONFLICT_PATH=SECURITY\.md/);
+    assert.equal(showFromBare(fixture.originBare, 'main', 'SECURITY.md'), 'origin revised hardened security');
+    assert.equal(showFromBare(fixture.originBare, 'main', 'README.md'), 'base readme');
+    assert.equal(fs.existsSync(fixture.validationLog), false);
+    assert.equal(fs.existsSync(fixture.installLog), false);
+  });
+
   test('dry-run validates the candidate but skips push and install', () => {
     const fixture = setupRepos();
 
@@ -818,7 +851,7 @@ describe('unattended upstream sync script', () => {
     assert.equal(fs.existsSync(fixture.installLog), false);
   });
 
-  test('upstream package metadata cannot replace trusted validation scripts with no-ops', () => {
+  test('upstream package overlap with trusted validation scripts blocks before validation', () => {
     const fixture = setupRepos();
     const trustedScripts = {
       test: 'node scripts/test-runner.js',
@@ -849,17 +882,15 @@ describe('unattended upstream sync script', () => {
 
     const result = runScript(fixture, ['--skip-install']);
 
-    assert.equal(result.status, 0, result.stderr + result.stdout);
-    const validationLog = fs.readFileSync(fixture.validationLog, 'utf8');
-    assert.match(validationLog, /pretest:coverage/);
-    assert.match(validationLog, /build:sdk/);
-    assert.match(validationLog, /lint:skill-deps/);
-    assert.match(validationLog, /npm test/);
-    const promotedPackage = JSON.parse(showFromBare(fixture.originBare, 'main', 'package.json'));
-    assert.equal(promotedPackage.description, 'upstream metadata');
+    assert.equal(result.status, 4, result.stderr + result.stdout);
+    assert.match(result.stdout, /CONFLICT_PATH=package\.json/);
+    const preservedPackage = JSON.parse(showFromBare(fixture.originBare, 'main', 'package.json'));
+    assert.equal(preservedPackage.description, undefined);
     for (const [scriptName, command] of Object.entries(trustedScripts)) {
-      assert.equal(promotedPackage.scripts[scriptName], command);
+      assert.equal(preservedPackage.scripts[scriptName], command);
     }
+    assert.equal(fs.existsSync(fixture.validationLog), false);
+    assert.equal(fs.existsSync(fixture.installLog), false);
   });
 
   test('candidate project .npmrc cannot suppress trusted validation lifecycle scripts', () => {
@@ -955,7 +986,7 @@ describe('unattended upstream sync script', () => {
     assert.doesNotMatch(validationLog, /candidate-node-options-bypass/);
   });
 
-  test('candidate cannot replace the trusted validation runner or test files', () => {
+  test('candidate overlap with the trusted validation runner or tests blocks before validation', () => {
     const fixture = setupRepos();
     writeFile(
       fixture.runner,
@@ -981,10 +1012,13 @@ describe('unattended upstream sync script', () => {
 
     const result = runScript(fixture, ['--dry-run']);
 
-    assert.equal(result.status, 0, result.stderr + result.stdout);
-    const validationLog = fs.readFileSync(fixture.validationLog, 'utf8');
-    assert.match(validationLog, /trusted-runner/, 'validation must execute the pinned runner bytes');
-    assert.match(validationLog, /trusted-test/, 'validation must execute the pinned test bytes');
+    assert.equal(result.status, 4, result.stderr + result.stdout);
+    assert.match(result.stdout, /CONFLICT_PATH=scripts\/run-tests\.cjs/);
+    assert.match(result.stdout, /CONFLICT_PATH=tests\/trusted-validation\.test\.cjs/);
+    assert.equal(showFromBare(fixture.originBare, 'main', 'scripts/run-tests.cjs').includes('trusted-runner'), true);
+    assert.equal(showFromBare(fixture.originBare, 'main', 'tests/trusted-validation.test.cjs').includes('trusted-test'), true);
+    assert.equal(fs.existsSync(fixture.validationLog), false);
+    assert.equal(fs.existsSync(fixture.installLog), false);
   });
 
   test('repo-local URL rewrites cannot redirect pre-fetch origin or upstream resolution', () => {
@@ -1718,7 +1752,7 @@ exit 96
     assert.equal(showFromBare(fixture.originBare, 'main', 'README.md'), 'upstream readme');
   });
 
-  test('candidate test cannot no-op scanners or remove candidate content before scanner validation', () => {
+  test('candidate overlap with trusted scanners blocks before candidate code can run', () => {
     const fixture = setupRepos();
     writeFile(fixture.runner, 'scripts/prompt-injection-scan.sh', createPayloadDetectingScanner('prompt'), 0o755);
     writeFile(fixture.runner, 'scripts/base64-scan.sh', createPayloadDetectingScanner('base64'), 0o755);
@@ -1738,17 +1772,15 @@ exit 96
 
     const result = runScript(fixture, ['--skip-install']);
 
-    assert.notEqual(result.status, 0, 'candidate scanner/content mutation must reject validation');
-    const validationLog = fs.readFileSync(fixture.validationLog, 'utf8');
-    assert.match(validationLog, /validation-mutated-scanners-and-payload/);
-    assert.match(validationLog, /prompt trusted --diff [0-9a-f]{40}/);
-    assert.doesNotMatch(validationLog, /candidate-noop-scanner/);
+    assert.equal(result.status, 4, result.stderr + result.stdout);
+    assert.match(result.stdout, /CONFLICT_PATH=scripts\/secret-scan\.sh/);
+    assert.equal(fs.existsSync(fixture.validationLog), false);
     assert.equal(showFromBare(fixture.originBare, 'main', 'README.md'), 'base readme');
     assert.equal(existsInBare(fixture.originBare, 'main', 'payload.md'), false);
     assert.equal(fs.existsSync(fixture.installLog), false);
   });
 
-  test('trusted Base64 scanner catches prompt injection whose decoded text ends in a newline', () => {
+  test('candidate overlap with the trusted Base64 scanner blocks before validation', () => {
     const fixture = setupRepos();
     writeFile(
       fixture.runner,
@@ -1773,9 +1805,12 @@ exit 96
 
     const result = runScript(fixture, ['--dry-run']);
 
-    assert.notEqual(result.status, 0, result.stderr + result.stdout);
-    assert.match(result.stdout + result.stderr, /base64 blob decodes to suspicious content/);
+    assert.equal(result.status, 4, result.stderr + result.stdout);
+    assert.match(result.stdout, /CONFLICT_PATH=scripts\/base64-scan\.cjs/);
     assert.equal(showFromBare(fixture.originBare, 'main', 'README.md'), 'base readme');
+    assert.equal(existsInBare(fixture.originBare, 'main', 'payload.md'), false);
+    assert.equal(fs.existsSync(fixture.validationLog), false);
+    assert.equal(fs.existsSync(fixture.installLog), false);
   });
 
   test('candidate smudge filter cannot hide committed payload bytes from trusted scanners', () => {
@@ -1813,7 +1848,7 @@ execFileSync('git', ['config', '--local', 'filter.hide-payload.required', 'true'
     assert.equal(showFromBare(fixture.originBare, 'main', 'README.md'), 'base readme');
   });
 
-  test('detached candidate watcher cannot replace trusted scanner bytes before execution', () => {
+  test('candidate watcher overlap with trusted scanners blocks before execution', () => {
     const fixture = setupRepos();
     const mutationLog = path.join(path.dirname(fixture.runner), 'trusted-scanner-mutation.log');
     writeFile(fixture.runner, 'scripts/prompt-injection-scan.sh', createPayloadDetectingScanner('prompt'), 0o755);
@@ -1838,13 +1873,13 @@ execFileSync('git', ['config', '--local', 'filter.hide-payload.required', 'true'
 
     const result = runScript(fixture, ['--skip-install']);
 
-    assert.notEqual(result.status, 0, 'trusted scanner execution must reject the malicious payload');
-    assert.match(fs.readFileSync(fixture.validationLog, 'utf8'), /prompt trusted --diff [0-9a-f]{40}/);
-    assert.doesNotMatch(fs.readFileSync(fixture.validationLog, 'utf8'), /detached-candidate-noop-scanner/);
-    assert.match(fs.readFileSync(mutationLog, 'utf8'), /trusted-scanner-watcher-started/);
-    assert.doesNotMatch(fs.readFileSync(mutationLog, 'utf8'), /trusted-scanners-mutated/);
+    assert.equal(result.status, 4, result.stderr + result.stdout);
+    assert.match(result.stdout, /CONFLICT_PATH=scripts\/secret-scan\.sh/);
+    assert.equal(fs.existsSync(fixture.validationLog), false);
+    assert.equal(fs.existsSync(mutationLog), false);
     assert.equal(showFromBare(fixture.originBare, 'main', 'README.md'), 'base readme');
     assert.equal(existsInBare(fixture.originBare, 'main', 'payload.md'), false);
+    assert.equal(fs.existsSync(fixture.installLog), false);
   });
 
   test('trusted promotion push credentials are cleaned after push failure', () => {
@@ -2129,7 +2164,7 @@ execFileSync('git', ['config', '--local', 'filter.hide-payload.required', 'true'
     assert.doesNotMatch(combinedOutput, new RegExp(fakeSecret));
   });
 
-  test('package.json conflict takes upstream package data and preserves local sync scripts', () => {
+  test('package.json overlap blocks before validation instead of auto-resolving', () => {
     const fixture = setupRepos();
     const localPkg = JSON.parse(fs.readFileSync(path.join(fixture.runner, 'package.json'), 'utf8'));
     localPkg.scripts['sync:upstream:unattended'] = 'bash scripts/unattended-upstream-sync.sh';
@@ -2146,45 +2181,47 @@ execFileSync('git', ['config', '--local', 'filter.hide-payload.required', 'true'
 
     const result = runScript(fixture);
 
-    assert.equal(result.status, 0, result.stderr || result.stdout);
-    const mergedPkg = JSON.parse(showFromBare(fixture.originBare, 'main', 'package.json'));
-    assert.equal(mergedPkg.version, '10.0.0');
-    assert.equal(mergedPkg.scripts.lint, 'node lint.js');
-    assert.equal(mergedPkg.scripts['sync:upstream:unattended'], 'bash scripts/unattended-upstream-sync.sh');
-    assert.equal(mergedPkg.scripts['sync:upstream:dry-run'], 'bash scripts/unattended-upstream-sync.sh --dry-run');
+    assert.equal(result.status, 4, result.stderr || result.stdout);
+    assert.match(result.stdout, /CONFLICT_PATH=package\.json/);
+    const preservedPkg = JSON.parse(showFromBare(fixture.originBare, 'main', 'package.json'));
+    assert.equal(preservedPkg.version, '9.9.9');
+    assert.equal(preservedPkg.scripts['sync:upstream:unattended'], undefined);
+    assert.equal(preservedPkg.scripts['sync:upstream:dry-run'], undefined);
+    assert.equal(fs.existsSync(fixture.validationLog), false);
+    assert.equal(fs.existsSync(fixture.installLog), false);
   });
 
-  test('non-preserved file conflicts take upstream content and continue through validation', () => {
+  test('non-preserved file overlap blocks instead of taking upstream content', () => {
     const fixture = setupRepos();
     writeFile(fixture.runner, 'README.md', 'local fork readme customization\n');
     commitAll(fixture.runner, 'local readme customization');
 
     const result = runScript(fixture, ['--skip-install']);
 
-    assert.equal(result.status, 0, result.stderr || result.stdout);
-    assert.match(result.stdout, /upstream-preferred merge resolution for non-preserved paths/);
-    assert.equal(showFromBare(fixture.originBare, 'main', 'README.md'), 'upstream readme');
+    assert.equal(result.status, 4, result.stderr || result.stdout);
+    assert.match(result.stdout, /CONFLICT_PATH=README\.md/);
+    assert.equal(showFromBare(fixture.originBare, 'main', 'README.md'), 'base readme');
     assert.equal(showFromBare(fixture.originBare, 'main', 'SECURITY.md'), 'origin hardened security');
-    assert.match(fs.readFileSync(fixture.validationLog, 'utf8'), /npm test/);
+    assert.equal(fs.existsSync(fixture.validationLog), false);
     assert.equal(fs.existsSync(fixture.installLog), false);
   });
 
-  test('non-preserved modify-delete conflicts take upstream content and continue through validation', () => {
+  test('non-preserved modify-delete overlap blocks instead of restoring upstream content', () => {
     const fixture = setupRepos();
     fs.rmSync(path.join(fixture.runner, 'README.md'));
     commitAll(fixture.runner, 'local readme deletion');
 
     const result = runScript(fixture, ['--skip-install']);
 
-    assert.equal(result.status, 0, result.stderr || result.stdout);
-    assert.match(result.stdout, /Resolving non-preserved merge conflict from upstream: README\.md/);
-    assert.equal(showFromBare(fixture.originBare, 'main', 'README.md'), 'upstream readme');
+    assert.equal(result.status, 4, result.stderr || result.stdout);
+    assert.match(result.stdout, /CONFLICT_PATH=README\.md/);
+    assert.equal(showFromBare(fixture.originBare, 'main', 'README.md'), 'base readme');
     assert.equal(showFromBare(fixture.originBare, 'main', 'SECURITY.md'), 'origin hardened security');
-    assert.match(fs.readFileSync(fixture.validationLog, 'utf8'), /npm test/);
+    assert.equal(fs.existsSync(fixture.validationLog), false);
     assert.equal(fs.existsSync(fixture.installLog), false);
   });
 
-  test('preserves the sync driver from fetched origin during upstream promotion', () => {
+  test('sync driver overlap blocks before promotion', () => {
     const fixture = setupRepos();
     const trustedDriver = '#!/usr/bin/env bash\nprintf "trusted sync driver\\n"\n';
     const upstreamDriver = '#!/usr/bin/env bash\nprintf "upstream replaced sync driver\\n"\n';
@@ -2198,9 +2235,40 @@ execFileSync('git', ['config', '--local', 'filter.hide-payload.required', 'true'
 
     const result = runScript(fixture, ['--skip-install']);
 
-    assert.equal(result.status, 0, result.stderr || result.stdout);
-    assert.equal(showFromBare(fixture.originBare, 'main', 'README.md'), 'upstream readme');
+    assert.equal(result.status, 4, result.stderr || result.stdout);
+    assert.match(result.stdout, /CONFLICT_PATH=scripts\/unattended-upstream-sync\.sh/);
+    assert.equal(showFromBare(fixture.originBare, 'main', 'README.md'), 'base readme');
     assert.equal(showFromBare(fixture.originBare, 'main', 'scripts/unattended-upstream-sync.sh'), trustedDriver.trim());
+    assert.equal(fs.existsSync(fixture.validationLog), false);
+    assert.equal(fs.existsSync(fixture.installLog), false);
+  });
+
+  test('blocks config mutation overlap for manual reconciliation', () => {
+    const fixture = setupRepos();
+    const trustedFiles = {
+      'sdk/src/query/config-mutation.ts': "export const configSet = 'origin-hardened';\n",
+      'sdk/src/query/config-schema.ts': "export const VALID_CONFIG_KEYS = new Set(['ship.pr_body_sections']); // origin-hardened\n",
+      'get-shit-done/bin/lib/config-schema.cjs': "module.exports = new Set(['ship.pr_body_sections']); // origin-hardened\n",
+    };
+
+    for (const [filePath, content] of Object.entries(trustedFiles)) {
+      writeFile(fixture.runner, filePath, content);
+      writeFile(fixture.upstreamWork, filePath, content.replaceAll('origin-hardened', 'upstream-v1.42.3'));
+    }
+    commitAll(fixture.runner, 'harden config mutation paths');
+    git(['push', 'origin', 'HEAD:main'], fixture.runner);
+    commitAll(fixture.upstreamWork, 'v1.42.3 config mutation changes');
+    git(['push', 'origin', 'HEAD:main'], fixture.upstreamWork);
+
+    const result = runScript(fixture, ['--skip-install']);
+
+    assert.equal(result.status, 4, result.stderr || result.stdout);
+    for (const [filePath, content] of Object.entries(trustedFiles)) {
+      assert.equal(showFromBare(fixture.originBare, 'main', filePath), content.trim());
+      assert.match(result.stdout, new RegExp(`CONFLICT_PATH=${filePath.replaceAll('.', '\\.')}`));
+    }
+    assert.equal(fs.existsSync(fixture.validationLog), false);
+    assert.equal(fs.existsSync(fixture.installLog), false);
   });
 
   test('rejects unsafe GSD_SYNC_PRESERVE_PATHS entries before promotion or install', () => {
@@ -2306,7 +2374,7 @@ execFileSync('git', ['config', '--local', 'filter.hide-payload.required', 'true'
     assert.equal(fs.existsSync(fixture.installLog), false);
   });
 
-  test('preserves newer fetched origin hardening when local main is stale', () => {
+  test('newer fetched origin hardening overlap blocks before promotion', () => {
     const fixture = setupRepos();
     const originWork = path.join(path.dirname(fixture.runner), 'origin-work');
     git(['clone', fixture.originBare, originWork], path.dirname(fixture.runner));
@@ -2320,14 +2388,18 @@ execFileSync('git', ['config', '--local', 'filter.hide-payload.required', 'true'
 
     const result = runScript(fixture, ['--skip-install']);
 
-    assert.equal(result.status, 0, result.stderr || result.stdout);
-    assert.equal(showFromBare(fixture.originBare, 'main', 'README.md'), 'upstream readme');
+    assert.equal(result.status, 4, result.stderr || result.stdout);
+    assert.match(result.stdout, /CONFLICT_PATH=SECURITY\.md/);
+    assert.match(result.stdout, /CONFLICT_PATH=scripts\/secret-scan\.sh/);
+    assert.equal(showFromBare(fixture.originBare, 'main', 'README.md'), 'base readme');
     assert.equal(showFromBare(fixture.originBare, 'main', 'SECURITY.md'), 'origin newer hardened security');
     assert.equal(showFromBare(fixture.originBare, 'main', '.github/workflows/hardened.yml'), 'name: origin newer hardened workflow');
     assert.equal(showFromBare(fixture.originBare, 'main', 'scripts/secret-scan.sh'), createScanner('secret-new').trim());
+    assert.equal(fs.existsSync(fixture.validationLog), false);
+    assert.equal(fs.existsSync(fixture.installLog), false);
   });
 
-  test('preserves trusted scanner ignore files from fetched origin before validation', () => {
+  test('trusted scanner ignore policy overlap blocks before validation', () => {
     const fixture = setupRepos();
     writeFile(fixture.runner, '.base64scanignore', 'trusted/base64-fixture.bin\n');
     writeFile(fixture.runner, '.secretscanignore', 'trusted/secrets-fixture.env\n');
@@ -2349,11 +2421,13 @@ execFileSync('git', ['config', '--local', 'filter.hide-payload.required', 'true'
       ].join('\n'),
     });
 
-    assert.equal(result.status, 0, result.stderr || result.stdout);
+    assert.equal(result.status, 4, result.stderr || result.stdout);
+    assert.match(result.stdout, /CONFLICT_PATH=\.base64scanignore/);
+    assert.match(result.stdout, /CONFLICT_PATH=\.secretscanignore/);
     assert.equal(showFromBare(fixture.originBare, 'main', '.base64scanignore'), 'trusted/base64-fixture.bin');
     assert.equal(showFromBare(fixture.originBare, 'main', '.secretscanignore'), 'trusted/secrets-fixture.env');
-    assert.match(fs.readFileSync(fixture.validationLog, 'utf8'), /base64 --diff [0-9a-f]{40}/);
-    assert.match(fs.readFileSync(fixture.validationLog, 'utf8'), /secret --diff [0-9a-f]{40}/);
+    assert.equal(showFromBare(fixture.originBare, 'main', 'README.md'), 'base readme');
+    assert.equal(fs.existsSync(fixture.validationLog), false);
     assert.equal(fs.existsSync(fixture.installLog), false);
   });
 });
