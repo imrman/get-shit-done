@@ -638,6 +638,7 @@ spawn(process.execPath, ['-e', watcher, workRoot, mutationLog, scanner], { detac
 function writeFakeProject(repoDir, { testExit = 0, testOutput = '' } = {}) {
   const scanExit = testExit === 0 ? 0 : testExit;
   writeFile(repoDir, 'README.md', 'base readme\n');
+  writeFile(repoDir, 'three-way.txt', 'first\nsecond\nthird\n');
   writeFile(repoDir, 'SECURITY.md', 'origin hardened security\n');
   writeFile(repoDir, '.github/workflows/hardened.yml', 'name: origin hardened workflow\n');
   writeFile(repoDir, '.github/CODEOWNERS', '* @origin-owner\n');
@@ -2164,29 +2165,40 @@ execFileSync('git', ['config', '--local', 'filter.hide-payload.required', 'true'
     assert.doesNotMatch(combinedOutput, new RegExp(fakeSecret));
   });
 
-  test('package.json overlap blocks before validation instead of auto-resolving', () => {
+  test('Git three-way merge accepts a same-path change in different hunks', () => {
+    const fixture = setupRepos();
+    writeFile(fixture.runner, 'three-way.txt', 'origin first\nsecond\nthird\n');
+    commitAll(fixture.runner, 'origin edits first hunk');
+    writeFile(fixture.upstreamWork, 'three-way.txt', 'first\nsecond\nupstream third\n');
+    commitAll(fixture.upstreamWork, 'upstream edits third hunk');
+    git(['push', 'origin', 'HEAD:main'], fixture.upstreamWork);
+
+    const result = runScript(fixture, ['--skip-install']);
+
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    assert.doesNotMatch(result.stdout, /SYNC_OUTCOME=BLOCKED_CONFLICT/);
+    assert.equal(showFromBare(fixture.originBare, 'main', 'three-way.txt'), 'origin first\nsecond\nupstream third');
+    assert.match(fs.readFileSync(fixture.validationLog, 'utf8'), /npm test/);
+    assert.equal(fs.existsSync(fixture.installLog), false);
+  });
+
+  test('conflicting package.json update blocks before validation', () => {
     const fixture = setupRepos();
     const localPkg = JSON.parse(fs.readFileSync(path.join(fixture.runner, 'package.json'), 'utf8'));
     localPkg.scripts['sync:upstream:unattended'] = 'bash scripts/unattended-upstream-sync.sh';
-    localPkg.scripts['sync:upstream:dry-run'] = 'bash scripts/unattended-upstream-sync.sh --dry-run';
     fs.writeFileSync(path.join(fixture.runner, 'package.json'), `${JSON.stringify(localPkg, null, 2)}\n`);
     commitAll(fixture.runner, 'local sync scripts');
 
     const upstreamPkg = JSON.parse(fs.readFileSync(path.join(fixture.upstreamWork, 'package.json'), 'utf8'));
-    upstreamPkg.version = '10.0.0';
-    upstreamPkg.scripts.lint = 'node lint.js';
+    upstreamPkg.scripts.test = 'node upstream-test-runner.js';
     fs.writeFileSync(path.join(fixture.upstreamWork, 'package.json'), `${JSON.stringify(upstreamPkg, null, 2)}\n`);
-    commitAll(fixture.upstreamWork, 'upstream package update');
+    commitAll(fixture.upstreamWork, 'upstream package test update');
     git(['push', 'origin', 'HEAD:main'], fixture.upstreamWork);
 
-    const result = runScript(fixture);
+    const result = runScript(fixture, ['--skip-install']);
 
     assert.equal(result.status, 4, result.stderr || result.stdout);
     assert.match(result.stdout, /CONFLICT_PATH=package\.json/);
-    const preservedPkg = JSON.parse(showFromBare(fixture.originBare, 'main', 'package.json'));
-    assert.equal(preservedPkg.version, '9.9.9');
-    assert.equal(preservedPkg.scripts['sync:upstream:unattended'], undefined);
-    assert.equal(preservedPkg.scripts['sync:upstream:dry-run'], undefined);
     assert.equal(fs.existsSync(fixture.validationLog), false);
     assert.equal(fs.existsSync(fixture.installLog), false);
   });

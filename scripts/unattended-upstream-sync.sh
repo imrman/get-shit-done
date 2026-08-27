@@ -97,9 +97,9 @@ Environment:
   GSD_SYNC_MIN_SKILLS     Minimum expected gsd-* Codex skills after install (default: 50)
   RUNNER_TEMP             Trusted parent directory required by --outcome-file
 
-Exit 4 with SYNC_OUTCOME=BLOCKED_CONFLICT means origin and upstream touched
-the same path, or Git reported an unresolved merge conflict. No candidate is
-validated, promoted, pushed, or installed in that case.
+Exit 4 with SYNC_OUTCOME=BLOCKED_CONFLICT means Git reported an unresolved
+three-way merge conflict. No candidate is validated, promoted, pushed, or
+installed in that case.
 EOF
 }
 
@@ -892,43 +892,6 @@ emit_conflict_outcome() {
   done
 }
 
-find_overlapping_paths() {
-  local candidate_base_sha="$1"
-  local merge_base
-  local origin_path
-  local upstream_path
-  local -a origin_paths=("")
-  local -a upstream_paths=("")
-
-  merge_base="$(trusted_git -C "$REPO_DIR" merge-base "$candidate_base_sha" "$upstream_sha")" ||
-    fail "Unable to determine the origin/upstream merge base"
-
-  while IFS= read -r -d '' origin_path; do
-    origin_paths+=("$origin_path")
-  done < <(trusted_git -C "$REPO_DIR" diff --no-renames --name-only -z "$merge_base" "$candidate_base_sha" --)
-  while IFS= read -r -d '' upstream_path; do
-    upstream_paths+=("$upstream_path")
-  done < <(trusted_git -C "$REPO_DIR" diff --no-renames --name-only -z "$merge_base" "$upstream_sha" --)
-
-  CONFLICT_PATHS=("")
-  CONFLICT_COUNT=0
-  for origin_path in "${origin_paths[@]}"; do
-    if [ -z "$origin_path" ]; then
-      continue
-    fi
-    for upstream_path in "${upstream_paths[@]}"; do
-      if [ -z "$upstream_path" ]; then
-        continue
-      fi
-      if [ "$origin_path" = "$upstream_path" ]; then
-        CONFLICT_PATHS+=("$origin_path")
-        CONFLICT_COUNT=$((CONFLICT_COUNT + 1))
-        break
-      fi
-    done
-  done
-}
-
 collect_unmerged_paths() {
   local conflict_path
 
@@ -1382,14 +1345,7 @@ if ! trusted_git -C "$SYNC_WORKTREE" -c core.hooksPath=/dev/null merge --ff-only
 fi
 
 log "Merging upstream candidate $upstream_sha into temporary candidate"
-candidate_base_sha="$(trusted_git -C "$SYNC_WORKTREE" rev-parse HEAD)"
-find_overlapping_paths "$candidate_base_sha"
-if [ "$CONFLICT_COUNT" -gt 0 ]; then
-  emit_conflict_outcome
-  log "Origin and upstream overlap; ${BASE_BRANCH} remains unchanged and requires manual reconciliation"
-  exit 4
-fi
-log "No origin/upstream path overlap detected; attempting a standard merge"
+log "Attempting a standard three-way merge"
 if ! trusted_git -C "$SYNC_WORKTREE" -c core.hooksPath=/dev/null merge --no-ff --no-edit --no-commit "$upstream_sha"; then
   collect_unmerged_paths
   if [ "$CONFLICT_COUNT" -gt 0 ]; then
