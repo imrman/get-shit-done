@@ -208,17 +208,19 @@ describe('install.js source correctness', () => {
     );
   });
 
-  test('isGsdHookCommand covers all GSD hook names', () => {
-    // The consolidated uninstall cleanup uses isGsdHookCommand — verify all hook names are present
+  test('uninstall list covers all GSD hook files', () => {
+    const gsdHooksMatch = src.match(/const gsdHooks\s*=\s*\[([^\]]+)\]/);
+    assert.ok(gsdHooksMatch, 'uninstall hook list must exist');
+    const uninstallHooks = gsdHooksMatch[1];
     const expectedHookNames = [
-      'gsd-check-update', 'gsd-statusline', 'gsd-session-state',
-      'gsd-context-monitor', 'gsd-phase-boundary', 'gsd-prompt-guard',
-      'gsd-read-guard', 'gsd-validate-commit', 'gsd-workflow-guard',
+      'gsd-check-update.js', 'gsd-statusline.js', 'gsd-session-state.sh',
+      'gsd-context-monitor.js', 'gsd-phase-boundary.sh', 'gsd-prompt-guard.js',
+      'gsd-read-guard.js', 'gsd-validate-commit.sh', 'gsd-workflow-guard.js',
     ];
     for (const name of expectedHookNames) {
       assert.ok(
-        src.includes(`'${name}'`) || src.includes(`"${name}"`),
-        `isGsdHookCommand should match ${name}`
+        uninstallHooks.includes(`'${name}'`) || uninstallHooks.includes(`"${name}"`),
+        `uninstall should remove ${name}`
       );
     }
   });

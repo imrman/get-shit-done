@@ -21,7 +21,7 @@ const CONFIG_MUTATION_TS = path.join(__dirname, '..', 'sdk', 'src', 'query', 'co
 // #2653 — allowlist moved to shared schema module.
 const CONFIG_SCHEMA_TS = path.join(__dirname, '..', 'sdk', 'src', 'query', 'config-schema.ts');
 const CONFIG_GATES_TS = path.join(__dirname, '..', 'sdk', 'src', 'query', 'config-gates.ts');
-const QUERY_INDEX_TS = path.join(__dirname, '..', 'sdk', 'src', 'query', 'index.ts');
+const QUERY_CATALOG_TS = path.join(__dirname, '..', 'sdk', 'src', 'query', 'command-static-catalog-foundation.ts');
 
 describe('plan-phase decision-coverage gate (#2492)', () => {
   const md = fs.readFileSync(PLAN_PHASE, 'utf-8');
@@ -163,10 +163,10 @@ describe('SDK wiring for #2492 gates', () => {
     );
   });
 
-  test('query index.ts registers the new handlers', () => {
-    const c = fs.readFileSync(QUERY_INDEX_TS, 'utf-8');
-    assert.ok(c.includes('check.decision-coverage-plan'), 'check.decision-coverage-plan handler must be registered');
-    assert.ok(c.includes('check.decision-coverage-verify'), 'check.decision-coverage-verify handler must be registered');
-    assert.ok(c.includes('decisions.parse'), 'decisions.parse handler must be registered');
+  test('query catalog registers the new handlers', () => {
+    const c = fs.readFileSync(QUERY_CATALOG_TS, 'utf-8');
+    assert.ok(c.includes("['check.decision-coverage-plan', checkDecisionCoveragePlan]"), 'check.decision-coverage-plan handler must be registered');
+    assert.ok(c.includes("['check.decision-coverage-verify', checkDecisionCoverageVerify]"), 'check.decision-coverage-verify handler must be registered');
+    assert.ok(c.includes("['decisions.parse', decisionsParse]"), 'decisions.parse handler must be registered');
   });
 });

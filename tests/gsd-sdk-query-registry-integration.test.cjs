@@ -1,6 +1,6 @@
 /**
  * Drift guard: every `gsd-sdk query <cmd>` reference in the repo must
- * resolve to a handler registered in sdk/src/query/index.ts.
+ * resolve to a handler in the built SDK registry.
  *
  * The set of commands workflows/agents/commands call must equal the set
  * the SDK registry exposes. New references with no handler — or handlers
@@ -11,10 +11,11 @@ const { describe, test } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
+const { pathToFileURL } = require('node:url');
 
 const REPO_ROOT = path.join(__dirname, '..');
-const REGISTRY_FILE = path.join(REPO_ROOT, 'sdk', 'src', 'query', 'index.ts');
-const COMMAND_ALIASES_FILE = path.join(REPO_ROOT, 'get-shit-done', 'bin', 'lib', 'command-aliases.generated.cjs');
+const SDK_SOURCE = path.join(REPO_ROOT, 'sdk', 'src');
+const BUILT_REGISTRY = path.join(REPO_ROOT, 'sdk', 'dist', 'query', 'index.js');
 
 // Prose tokens that repeatedly appear after `gsd-sdk query` in English
 // documentation but aren't real command names.
@@ -39,43 +40,17 @@ const EXTRA_FILES = ['README.md', 'CHANGELOG.md'];
 const EXTENSIONS = new Set(['.md', '.sh', '.cjs', '.js', '.ts']);
 const SKIP_DIRS = new Set(['node_modules', '.git', 'dist', 'build']);
 
-function collectRegisteredNames() {
-  const src = fs.readFileSync(REGISTRY_FILE, 'utf8');
-  const names = new Set();
-
-  // Static registrations in index.ts
-  const re = /registry\.register\(\s*['"]([^'"]+)['"]/g;
-  let m;
-  while ((m = re.exec(src)) !== null) names.add(m[1]);
-
-  // Manifest-generated family aliases registered via loop in index.ts.
-  // Keep this in sync with command-manifest-driven routing seams.
-  try {
-    // eslint-disable-next-line global-require, import/no-dynamic-require
-    const aliases = require(COMMAND_ALIASES_FILE);
-    const familyArrays = [
-      aliases.STATE_COMMAND_ALIASES,
-      aliases.VERIFY_COMMAND_ALIASES,
-      aliases.INIT_COMMAND_ALIASES,
-      aliases.PHASE_COMMAND_ALIASES,
-      aliases.PHASES_COMMAND_ALIASES,
-      aliases.VALIDATE_COMMAND_ALIASES,
-      aliases.ROADMAP_COMMAND_ALIASES,
-    ];
-    for (const arr of familyArrays) {
-      if (!Array.isArray(arr)) continue;
-      for (const entry of arr) {
-        if (entry?.canonical) names.add(entry.canonical);
-        if (Array.isArray(entry?.aliases)) {
-          for (const alias of entry.aliases) names.add(alias);
-        }
-      }
-    }
-  } catch {
-    // If generated aliases are unavailable, fall back to static extraction only.
-  }
-
-  return names;
+async function collectRegisteredNames() {
+  assert.ok(fs.existsSync(BUILT_REGISTRY), 'SDK build required before registry integration test (sdk/dist/query/index.js missing)');
+  const builtAt = fs.statSync(BUILT_REGISTRY).mtimeMs;
+  const sources = [];
+  walk(SDK_SOURCE, sources);
+  assert.ok(
+    sources.filter(file => file.endsWith('.ts')).every(file => fs.statSync(file).mtimeMs <= builtAt),
+    'SDK build required before registry integration test (sdk/src is newer than sdk/dist)'
+  );
+  const { buildRegistry } = await import(pathToFileURL(BUILT_REGISTRY).href);
+  return new Set(buildRegistry().commands());
 }
 
 function walk(dir, files) {
@@ -141,8 +116,8 @@ function resolveReference(ref, registered) {
 }
 
 describe('gsd-sdk query registry integration', () => {
-  test('every referenced command resolves to a registered handler', () => {
-    const registered = collectRegisteredNames();
+  test('every referenced command resolves to a registered handler', async () => {
+    const registered = await collectRegisteredNames();
     const refs = collectReferences();
 
     assert.ok(registered.size > 0, 'expected to parse registered names');
@@ -159,13 +134,13 @@ describe('gsd-sdk query registry integration', () => {
     assert.strictEqual(
       offenders.length, 0,
       'Referenced `gsd-sdk query <cmd>` tokens with no handler in ' +
-      'sdk/src/query/index.ts. Either register the handler or remove ' +
+      'the built SDK registry. Either register the handler or remove ' +
       'the reference.\n\n' + offenders.join('\n')
     );
   });
 
-  test('informational: handlers with no in-repo caller', () => {
-    const registered = collectRegisteredNames();
+  test('informational: handlers with no in-repo caller', async () => {
+    const registered = await collectRegisteredNames();
     const refs = collectReferences();
 
     const referencedNames = new Set();
@@ -195,5 +170,10 @@ describe('gsd-sdk query registry integration', () => {
       console.log('[info] registered handlers with no in-repo caller:\n  ' + unused.join('\n  '));
     }
     assert.ok(true);
+  });
+
+  test('unregistered command references fail resolution', async () => {
+    const registered = await collectRegisteredNames();
+    assert.equal(resolveReference({ tok1: 'unregistered-ci-regression-probe', tok2: null }, registered), false);
   });
 });
