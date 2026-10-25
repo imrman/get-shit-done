@@ -1,6 +1,6 @@
 # Reapply Local Patches Workflow
 
-Invoked by `/gsd-update --reapply` (`commands/gsd/update.md`).
+Historical recovery workflow. The `/gsd-update --reapply` entry point is retired; use guarded OpenGSD maintenance for current installations.
 
 After a GSD update wipes and reinstalls files, this workflow merges user's previously saved local modifications back into the new version. Uses three-way comparison (pristine baseline, user-modified backup, newly installed version) to reliably distinguish user customizations from version drift.
 
@@ -111,7 +111,7 @@ Read `backup-meta.json` from the patches directory.
 ```
 No local patches found. Nothing to reapply.
 
-Local patches are automatically saved when you run /gsd-update
+Historical note: the retired updater saved local patches before an update
 after modifying any GSD workflow, command, or agent files.
 ```
 Exit.
@@ -274,7 +274,7 @@ Before proceeding to cleanup, evaluate the Hunk Verification Table produced in S
 **If the Hunk Verification Table is absent** (Step 4 did not produce it), STOP immediately and report to the user:
 ```
 ERROR: Hunk Verification Table is missing. Post-merge verification was not completed.
-Rerun /gsd-update --reapply to retry with full verification.
+For current installations, use guarded OpenGSD maintenance to assess recovery and patch reapplication.
 ```
 
 **If any row in the Hunk Verification Table shows `verified: no`**, STOP and report to the user:

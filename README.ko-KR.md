@@ -19,9 +19,7 @@
 
 <br>
 
-```bash
-npx get-shit-done-cc@latest
-```
+이 포크의 기존 설치 및 업데이트 경로는 사용 중단되었습니다. 설치된 OpenGSD는 검증된 OpenGSD 유지관리 절차로 관리하세요. 이전 npm 설치 프로그램을 실행하지 마세요.
 
 **Mac, Windows, Linux 모두 지원.**
 
@@ -91,103 +89,7 @@ GSD가 그걸 고칩니다. Claude Code를 신뢰할 수 있게 만드는 컨텍
 
 ## 시작하기
 
-```bash
-npx get-shit-done-cc@latest
-```
-
-설치 중에 다음을 선택합니다:
-1. **런타임** — Claude Code, OpenCode, Gemini, Kilo, Codex, Copilot, Cursor, Windsurf, Antigravity, Augment, Trae, Cline, 또는 전체 (대화형 다중 선택 — 한 번에 여러 런타임 선택 가능)
-2. **위치** — 전역 (모든 프로젝트) 또는 로컬 (현재 프로젝트만)
-
-설치가 됐는지 확인하려면:
-- Claude Code / Gemini / Copilot / Antigravity: `/gsd-help`
-- OpenCode / Kilo / Augment / Trae: `/gsd-help`
-- Codex: `$gsd-help`
-- Cline: GSD는 `.clinerules`를 통해 설치 — `.clinerules` 존재 여부 확인
-
-> [!NOTE]
-> Claude Code 2.1.88+와 Codex는 스킬(`skills/gsd-*/SKILL.md`)로 설치됩니다. Cline은 `.clinerules`를 사용합니다. 설치 프로그램이 모든 형식을 자동으로 처리합니다.
-
-> [!TIP]
-> 소스 기반 설치 또는 npm을 사용할 수 없는 환경은 **[docs/manual-update.md](docs/manual-update.md)**를 참조하세요.
-
-### 업데이트 유지
-
-GSD는 빠르게 발전합니다. 주기적으로 업데이트하세요:
-
-```bash
-npx get-shit-done-cc@latest
-```
-
-<details>
-<summary><strong>비대화형 설치 (Docker, CI, 스크립트)</strong></summary>
-
-```bash
-# Claude Code
-npx get-shit-done-cc --claude --global   # ~/.claude/에 설치
-npx get-shit-done-cc --claude --local    # ./.claude/에 설치
-
-# OpenCode
-npx get-shit-done-cc --opencode --global # ~/.config/opencode/에 설치
-
-# Gemini CLI
-npx get-shit-done-cc --gemini --global   # ~/.gemini/에 설치
-
-# Kilo
-npx get-shit-done-cc --kilo --global     # ~/.config/kilo/에 설치
-npx get-shit-done-cc --kilo --local      # ./.kilo/에 설치
-
-# Codex
-npx get-shit-done-cc --codex --global    # ~/.codex/에 설치
-npx get-shit-done-cc --codex --local     # ./.codex/에 설치
-
-# Copilot
-npx get-shit-done-cc --copilot --global  # ~/.github/에 설치
-npx get-shit-done-cc --copilot --local   # ./.github/에 설치
-
-# Cursor CLI
-npx get-shit-done-cc --cursor --global      # ~/.cursor/에 설치
-npx get-shit-done-cc --cursor --local       # ./.cursor/에 설치
-
-# Antigravity
-npx get-shit-done-cc --antigravity --global # ~/.gemini/antigravity/에 설치
-npx get-shit-done-cc --antigravity --local  # ./.agent/에 설치
-
-# Augment
-npx get-shit-done-cc --augment --global     # ~/.augment/에 설치
-npx get-shit-done-cc --augment --local      # ./.augment/에 설치
-
-# Trae
-npx get-shit-done-cc --trae --global        # ~/.trae/에 설치
-npx get-shit-done-cc --trae --local         # ./.trae/에 설치
-
-# Cline
-npx get-shit-done-cc --cline --global       # ~/.cline/에 설치
-npx get-shit-done-cc --cline --local        # ./.clinerules에 설치
-
-# 전체 런타임
-npx get-shit-done-cc --all --global      # 모든 디렉터리에 설치
-```
-
-위치 프롬프트 건너뛰기: `--global` (`-g`) 또는 `--local` (`-l`).
-런타임 프롬프트 건너뛰기: `--claude`, `--opencode`, `--gemini`, `--kilo`, `--codex`, `--copilot`, `--cursor`, `--windsurf`, `--antigravity`, `--augment`, `--trae`, `--cline`, 또는 `--all`.
-
-</details>
-
-<details>
-<summary><strong>개발 설치</strong></summary>
-
-저장소를 클론하고 설치 프로그램을 로컬에서 실행합니다:
-
-```bash
-git clone https://github.com/gsd-build/get-shit-done.git
-cd get-shit-done
-node bin/install.js --claude --local
-```
-
-기여 전 수정사항 테스트를 위해 `./.claude/`에 설치됩니다.
-
-</details>
+이 포크의 기존 설치 및 업데이트 경로는 사용 중단되었습니다. 설치된 OpenGSD는 검증된 OpenGSD 유지관리 절차로 관리하세요. 이전 npm 설치 프로그램을 실행하지 마세요.
 
 ### 권장: 권한 확인 건너뛰기 모드
 
@@ -580,7 +482,7 @@ lmn012o feat(08-02): create registration endpoint
 | `/gsd-progress` | 지금 어디에 있나? 다음은? |
 | `/gsd-next` | 상태 자동 감지 및 다음 단계 실행 |
 | `/gsd-help` | 모든 명령어와 사용 가이드 표시 |
-| `/gsd-update` | 변경 로그 미리보기와 함께 GSD 업데이트 |
+| `/gsd-update` | 이전 업데이트 명령은 사용 중단되었습니다. 검증된 OpenGSD 유지관리 절차를 사용하세요. |
 | `/gsd-join-discord` | GSD Discord 커뮤니티 참여 |
 | `/gsd-manager` | 여러 단계 관리를 위한 대화형 커맨드 센터 |
 
@@ -770,63 +672,11 @@ GSD의 코드베이스 매핑 및 분석 명령어는 프로젝트를 이해하�
 
 ## 문제 해결
 
-**설치 후 명령어를 찾을 수 없나요?**
-- 런타임을 재시작해 명령어/스킬을 다시 로드하세요
-- `~/.claude/commands/gsd/` (전역) 또는 `./.claude/commands/gsd/` (로컬)에 파일이 있는지 확인하세요
-- Codex의 경우 `~/.codex/skills/gsd-*/SKILL.md` (전역) 또는 `./.codex/skills/gsd-*/SKILL.md` (로컬)에 스킬이 있는지 확인하세요
-
-**명령어가 예상대로 작동하지 않나요?**
-- `/gsd-help`를 실행해 설치 확인
-- `npx get-shit-done-cc`를 다시 실행해 재설치
-
-**최신 버전으로 업데이트하나요?**
-```bash
-npx get-shit-done-cc@latest
-```
-
-**Docker 또는 컨테이너 환경을 사용하나요?**
-
-파일 읽기가 틸드 경로(`~/.claude/...`)로 실패하면 설치 전에 `CLAUDE_CONFIG_DIR`를 설정하세요:
-```bash
-CLAUDE_CONFIG_DIR=/home/youruser/.claude npx get-shit-done-cc --global
-```
-컨테이너에서 올바르게 확장되지 않을 수 있는 `~` 대신 절대 경로가 사용됩니다.
-
-### 제거
-
-GSD를 완전히 제거하려면:
-
-```bash
-# 전역 설치
-npx get-shit-done-cc --claude --global --uninstall
-npx get-shit-done-cc --opencode --global --uninstall
-npx get-shit-done-cc --gemini --global --uninstall
-npx get-shit-done-cc --kilo --global --uninstall
-npx get-shit-done-cc --codex --global --uninstall
-npx get-shit-done-cc --copilot --global --uninstall
-npx get-shit-done-cc --cursor --global --uninstall
-npx get-shit-done-cc --antigravity --global --uninstall
-npx get-shit-done-cc --trae --global --uninstall
-
-# 로컬 설치 (현재 프로젝트)
-npx get-shit-done-cc --claude --local --uninstall
-npx get-shit-done-cc --opencode --local --uninstall
-npx get-shit-done-cc --gemini --local --uninstall
-npx get-shit-done-cc --kilo --local --uninstall
-npx get-shit-done-cc --codex --local --uninstall
-npx get-shit-done-cc --copilot --local --uninstall
-npx get-shit-done-cc --cursor --local --uninstall
-npx get-shit-done-cc --antigravity --local --uninstall
-npx get-shit-done-cc --trae --local --uninstall
-```
-
-다른 설정은 그대로 유지하면서 GSD의 모든 명령어, 에이전트, 훅, 설정을 제거합니다.
-
----
+이 포크의 기존 설치 및 업데이트 경로는 사용 중단되었습니다. 설치된 OpenGSD는 검증된 OpenGSD 유지관리 절차로 관리하세요. 이전 npm 설치 프로그램을 실행하지 마세요.
 
 ## 커뮤니티 포트
 
-OpenCode, Gemini CLI, Kilo, Codex는 이제 `npx get-shit-done-cc`를 통해 기본 지원됩니다.
+기존 get-shit-done-cc 설치 프로그램은 OpenCode, Gemini CLI, Kilo, Codex의 기본 지원을 제공했습니다.
 
 이 커뮤니티 포트들이 멀티 런타임 지원의 선구자였습니다:
 

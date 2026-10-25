@@ -19,9 +19,7 @@
 
 <br>
 
-```bash
-npx get-shit-done-cc@latest
-```
+As rotas antigas de instalação e atualização deste fork foram desativadas. Use a manutenção protegida do OpenGSD para a versão instalada. Não execute o instalador npm antigo.
 
 **Funciona em Mac, Windows e Linux.**
 
@@ -89,86 +87,7 @@ Lista completa nas [notas de release v1.39.0](https://github.com/gsd-build/get-s
 
 ## Primeiros passos
 
-```bash
-npx get-shit-done-cc@latest
-```
-
-O instalador pede:
-1. **Runtime** — Claude Code, OpenCode, Gemini, Kilo, Codex, Copilot, Cursor, Windsurf, Antigravity, Augment, Trae, Cline, ou todos
-2. **Local** — Global (todos os projetos) ou local (apenas projeto atual)
-
-Verifique com:
-- Claude Code / Gemini / Copilot / Antigravity: `/gsd-help`
-- OpenCode / Kilo / Augment / Trae: `/gsd-help`
-- Codex: `$gsd-help`
-- Cline: GSD instala via `.clinerules` — verifique se `.clinerules` existe
-
-> [!NOTE]
-> Claude Code 2.1.88+ e Codex instalam como skills (`skills/gsd-*/SKILL.md`). Cline usa `.clinerules`. O instalador lida com todos os formatos automaticamente.
-
-> [!TIP]
-> Para instalação a partir do código-fonte ou ambientes sem npm, consulte **[docs/manual-update.md](docs/manual-update.md)**.
-
-### Mantendo atualizado
-
-```bash
-npx get-shit-done-cc@latest
-```
-
-<details>
-<summary><strong>Instalação não interativa (Docker, CI, Scripts)</strong></summary>
-
-```bash
-# Claude Code
-npx get-shit-done-cc --claude --global
-npx get-shit-done-cc --claude --local
-
-# OpenCode
-npx get-shit-done-cc --opencode --global
-
-# Gemini CLI
-npx get-shit-done-cc --gemini --global
-
-# Kilo
-npx get-shit-done-cc --kilo --global
-npx get-shit-done-cc --kilo --local
-
-# Codex
-npx get-shit-done-cc --codex --global
-npx get-shit-done-cc --codex --local
-
-# Copilot
-npx get-shit-done-cc --copilot --global
-npx get-shit-done-cc --copilot --local
-
-# Cursor
-npx get-shit-done-cc --cursor --global
-npx get-shit-done-cc --cursor --local
-
-# Antigravity
-npx get-shit-done-cc --antigravity --global
-npx get-shit-done-cc --antigravity --local
-
-# Augment
-npx get-shit-done-cc --augment --global     # Install to ~/.augment/
-npx get-shit-done-cc --augment --local      # Install to ./.augment/
-
-# Trae
-npx get-shit-done-cc --trae --global        # Install to ~/.trae/
-npx get-shit-done-cc --trae --local         # Install to ./.trae/
-
-# Cline
-npx get-shit-done-cc --cline --global       # Install to ~/.cline/
-npx get-shit-done-cc --cline --local        # Install to ./.clinerules
-
-# Todos
-npx get-shit-done-cc --all --global
-```
-
-Use `--global` (`-g`) ou `--local` (`-l`) para pular a pergunta de local.
-Use `--claude`, `--opencode`, `--gemini`, `--kilo`, `--codex`, `--copilot`, `--cursor`, `--windsurf`, `--antigravity`, `--augment`, `--trae`, `--cline` ou `--all` para pular a pergunta de runtime.
-
-</details>
+As rotas antigas de instalação e atualização deste fork foram desativadas. Use a manutenção protegida do OpenGSD para a versão instalada. Não execute o instalador npm antigo.
 
 ### Recomendado: modo sem permissões
 
@@ -409,56 +328,11 @@ Adicione padrões sensíveis ao deny list do Claude Code:
 
 ## Solução de problemas
 
-**Comandos não apareceram após instalar?**
-- Reinicie o runtime
-- Verifique se os arquivos foram instalados no diretório correto
-
-**Comandos não funcionam como esperado?**
-- Rode `/gsd-help`
-- Reinstale com `npx get-shit-done-cc@latest`
-
-**Em Docker/container?**
-- Defina `CLAUDE_CONFIG_DIR` antes da instalação:
-
-```bash
-CLAUDE_CONFIG_DIR=/home/youruser/.claude npx get-shit-done-cc --global
-```
-
-### Desinstalar
-
-```bash
-# Instalações globais
-npx get-shit-done-cc --claude --global --uninstall
-npx get-shit-done-cc --opencode --global --uninstall
-npx get-shit-done-cc --gemini --global --uninstall
-npx get-shit-done-cc --kilo --global --uninstall
-npx get-shit-done-cc --codex --global --uninstall
-npx get-shit-done-cc --copilot --global --uninstall
-npx get-shit-done-cc --cursor --global --uninstall
-npx get-shit-done-cc --antigravity --global --uninstall
-npx get-shit-done-cc --augment --global --uninstall
-npx get-shit-done-cc --trae --global --uninstall
-npx get-shit-done-cc --cline --global --uninstall
-
-# Instalações locais (projeto atual)
-npx get-shit-done-cc --claude --local --uninstall
-npx get-shit-done-cc --opencode --local --uninstall
-npx get-shit-done-cc --gemini --local --uninstall
-npx get-shit-done-cc --kilo --local --uninstall
-npx get-shit-done-cc --codex --local --uninstall
-npx get-shit-done-cc --copilot --local --uninstall
-npx get-shit-done-cc --cursor --local --uninstall
-npx get-shit-done-cc --antigravity --local --uninstall
-npx get-shit-done-cc --augment --local --uninstall
-npx get-shit-done-cc --trae --local --uninstall
-npx get-shit-done-cc --cline --local --uninstall
-```
-
----
+As rotas antigas de instalação e atualização deste fork foram desativadas. Use a manutenção protegida do OpenGSD para a versão instalada. Não execute o instalador npm antigo.
 
 ## Community Ports
 
-OpenCode, Gemini CLI, Kilo e Codex agora são suportados nativamente via `npx get-shit-done-cc`.
+Historicamente, o antigo instalador get-shit-done-cc adicionou suporte nativo para OpenCode, Gemini CLI, Kilo e Codex.
 
 | Projeto | Plataforma | Descrição |
 |---------|------------|-----------|

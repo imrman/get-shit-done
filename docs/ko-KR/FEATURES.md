@@ -789,18 +789,9 @@
 
 ---
 
-### 31. Update System
+### 31. 이전 업데이트 시스템 (사용 중단)
 
-**명령어:** `/gsd-update`
-
-**목적:** 변경 로그 미리보기와 함께 GSD를 최신 버전으로 업데이트합니다.
-
-**요구사항.**
-- REQ-UPDATE-01: npm을 통해 새 버전을 확인해야 합니다.
-- REQ-UPDATE-02: 업데이트 전에 새 버전의 변경 로그를 표시해야 합니다.
-- REQ-UPDATE-03: 런타임을 인식하고 올바른 디렉토리를 대상으로 해야 합니다.
-- REQ-UPDATE-04: 로컬에서 수정된 파일을 `gsd-local-patches/`에 백업해야 합니다.
-- REQ-UPDATE-05: `/gsd-reapply-patches`는 업데이트 후 로컬 수정사항을 복원해야 합니다.
+이전 `/gsd-update`는 사용 중단되었습니다. 설치된 OpenGSD의 검증된 유지관리 절차를 사용하세요.
 
 ---
 
@@ -918,12 +909,12 @@ fix(03-01): correct auth token expiry
 
 ### 37. Hook System
 
-**목적:** 컨텍스트 모니터링, 상태 표시, 업데이트 확인을 위한 런타임 이벤트 훅.
+**목적:** 컨텍스트 모니터링 및 상태 표시를 위한 런타임 이벤트 훅. 이전 업데이트 확인은 사용 중단되었습니다.
 
 **요구사항.**
 - REQ-HOOK-01: 상태표시줄은 모델, 현재 작업, 디렉토리, 컨텍스트 사용량을 표시해야 합니다.
 - REQ-HOOK-02: 컨텍스트 모니터는 임계값에서 에이전트 대상 경고를 주입해야 합니다.
-- REQ-HOOK-03: 업데이트 확인기는 세션 시작 시 백그라운드에서 실행되어야 합니다.
+- REQ-HOOK-03: 이전 업데이트 확인기는 사용 중단되었습니다.
 - REQ-HOOK-04: 모든 훅은 `CLAUDE_CONFIG_DIR` 환경 변수를 준수해야 합니다.
 - REQ-HOOK-05: 모든 훅은 3초 stdin 타임아웃 가드를 포함해야 합니다.
 - REQ-HOOK-06: 모든 훅은 오류 시 자동으로 실패해야 합니다.
@@ -931,7 +922,7 @@ fix(03-01): correct auth token expiry
 
 **상태표시줄 표시.**
 ```
-[⬆ /gsd-update │] model │ [current task │] directory [█████░░░░░ 50%]
+ model │ [current task │] directory [█████░░░░░ 50%]
 ```
 
 색상 코드: <50% 초록, <65% 노랑, <80% 주황, ≥80% 해골 이모지와 함께 빨강
@@ -1310,7 +1301,7 @@ Claude가 GSD 워크플로우 컨텍스트 밖에서 파일 편집을 시도하�
 
 ### 55. Multi-Runtime Installer Selection
 
-**일부:** `npx get-shit-done-cc`
+**이전 구성요소:** 사용 중단된 설치 프로그램
 
 **목적:** 단일 대화형 설치 세션에서 여러 런타임을 선택합니다.
 
@@ -1329,7 +1320,7 @@ Claude가 GSD 워크플로우 컨텍스트 밖에서 파일 편집을 시도하�
 
 ### 56. Windsurf 런타임 지원
 
-**대상:** `npx get-shit-done-cc`
+**이전 구성요소:** 사용 중단된 설치 프로그램
 
 **목적:** Windsurf AI IDE 지원을 추가합니다.
 
@@ -1570,7 +1561,7 @@ Claude가 GSD 워크플로우 컨텍스트 밖에서 파일 편집을 시도하�
 
 ### 68. Claude Code 스킬 마이그레이션
 
-**대상:** `npx get-shit-done-cc`
+**이전 구성요소:** 사용 중단된 설치 프로그램
 
 **목적:** GSD 명령어를 하위 호환성을 유지하면서 Claude Code 2.1.88+ 스킬 형식으로 마이그레이션합니다.
 
@@ -1819,21 +1810,15 @@ Claude가 GSD 워크플로우 컨텍스트 밖에서 파일 편집을 시도하�
 
 ---
 
-### 84. 수동 업데이트 절차
+### 84. Manual Update (retired)
 
-**대상:** `docs/manual-update.md`
-
-**목적:** `npx`가 사용 불가하거나 npm 퍼블리시에 장애가 발생한 환경을 위한 수동 업데이트 경로를 문서화합니다.
-
-**요구사항.**
-- REQ-MANUAL-01: 문서는 단계별 수동 업데이트 절차를 설명해야 합니다.
-- REQ-MANUAL-02: 절차는 npm 접근 없이 작동해야 합니다.
+`docs/manual-update.md` now contains a retirement notice. Use guarded OpenGSD maintenance.
 
 ---
 
 ### 85. 신규 런타임 지원 (Trae, Cline, Augment Code)
 
-**대상:** `npx get-shit-done-cc`
+**이전 구성요소:** 사용 중단된 설치 프로그램
 
 **목적:** Trae IDE, Cline, Augment Code 런타임으로 GSD 설치를 확장합니다.
 

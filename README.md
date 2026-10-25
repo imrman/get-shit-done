@@ -19,9 +19,7 @@
 
 <br>
 
-```bash
-npx get-shit-done-cc@latest
-```
+This fork's legacy install and update paths are retired. Use guarded OpenGSD maintenance for the installed OpenGSD release. Do not run the old npm installer from this checkout.
 
 **Works on Mac, Windows, and Linux.**
 
@@ -105,176 +103,7 @@ See the [v1.39.0 release notes](https://github.com/gsd-build/get-shit-done/relea
 
 ## Getting Started
 
-```bash
-npx get-shit-done-cc@latest
-```
-
-The installer prompts you to choose:
-1. **Runtime** — Claude Code, OpenCode, Gemini, Kilo, Codex, Copilot, Cursor, Windsurf, Antigravity, Augment, Trae, Qwen Code, Hermes Agent, CodeBuddy, Cline, or all (interactive multi-select — pick multiple runtimes in a single install session)
-2. **Location** — Global (all projects) or local (current project only)
-
-Verify with:
-- Claude Code / Gemini / Copilot / Antigravity / Qwen Code / Hermes Agent: `/gsd-help`
-- OpenCode / Kilo / Augment / Trae / CodeBuddy: `/gsd-help`
-- Codex: `$gsd-help`
-- Cline: GSD installs via `.clinerules` — verify by checking `.clinerules` exists
-
-> [!NOTE]
-> Claude Code 2.1.88+, Qwen Code, and Codex install as skills (`.claude/skills/`, `./.codex/skills/`, or the matching global `~/.claude/skills/` / `~/.codex/skills/` roots). Older Claude Code versions use `commands/gsd/`. `~/.claude/get-shit-done/skills/` is import-only for legacy migration. The installer handles all formats automatically.
-
-The canonical discovery contract is documented in [docs/skills/discovery-contract.md](docs/skills/discovery-contract.md).
-
-> [!TIP]
-> For source-based installs or environments where npm is unavailable, see **[docs/manual-update.md](docs/manual-update.md)**.
-
-### Staying Updated
-
-GSD evolves fast. Update periodically:
-
-```bash
-npx get-shit-done-cc@latest
-```
-
-<details>
-<summary><strong>Non-interactive Install (Docker, CI, Scripts)</strong></summary>
-
-```bash
-# Claude Code
-npx get-shit-done-cc --claude --global   # Install to ~/.claude/
-npx get-shit-done-cc --claude --local    # Install to ./.claude/
-
-# OpenCode
-npx get-shit-done-cc --opencode --global # Install to ~/.config/opencode/
-
-# Gemini CLI
-npx get-shit-done-cc --gemini --global   # Install to ~/.gemini/
-
-# Kilo
-npx get-shit-done-cc --kilo --global     # Install to ~/.config/kilo/
-npx get-shit-done-cc --kilo --local      # Install to ./.kilo/
-
-# Codex
-npx get-shit-done-cc --codex --global    # Install to ~/.codex/
-npx get-shit-done-cc --codex --local     # Install to ./.codex/
-
-# Copilot
-npx get-shit-done-cc --copilot --global  # Install to ~/.github/
-npx get-shit-done-cc --copilot --local   # Install to ./.github/
-
-# Cursor CLI
-npx get-shit-done-cc --cursor --global      # Install to ~/.cursor/
-npx get-shit-done-cc --cursor --local       # Install to ./.cursor/
-
-# Windsurf
-npx get-shit-done-cc --windsurf --global    # Install to ~/.codeium/windsurf/
-npx get-shit-done-cc --windsurf --local     # Install to ./.windsurf/
-
-# Antigravity
-npx get-shit-done-cc --antigravity --global # Install to ~/.gemini/antigravity/
-npx get-shit-done-cc --antigravity --local  # Install to ./.agent/
-
-# Augment
-npx get-shit-done-cc --augment --global     # Install to ~/.augment/
-npx get-shit-done-cc --augment --local      # Install to ./.augment/
-
-# Trae
-npx get-shit-done-cc --trae --global        # Install to ~/.trae/
-npx get-shit-done-cc --trae --local         # Install to ./.trae/
-
-# Qwen Code
-npx get-shit-done-cc --qwen --global        # Install to ~/.qwen/
-npx get-shit-done-cc --qwen --local         # Install to ./.qwen/
-
-# Hermes Agent
-npx get-shit-done-cc --hermes --global      # Install to ~/.hermes/ (honors $HERMES_HOME)
-npx get-shit-done-cc --hermes --local       # Install to ./.hermes/
-
-# CodeBuddy
-npx get-shit-done-cc --codebuddy --global   # Install to ~/.codebuddy/
-npx get-shit-done-cc --codebuddy --local    # Install to ./.codebuddy/
-
-# Cline
-npx get-shit-done-cc --cline --global       # Install to ~/.cline/
-npx get-shit-done-cc --cline --local        # Install to ./.clinerules
-
-# All runtimes
-npx get-shit-done-cc --all --global      # Install to all directories
-```
-
-Use `--global` (`-g`) or `--local` (`-l`) to skip the location prompt.
-Use `--claude`, `--opencode`, `--gemini`, `--kilo`, `--codex`, `--copilot`, `--cursor`, `--windsurf`, `--antigravity`, `--augment`, `--trae`, `--qwen`, `--hermes`, `--codebuddy`, `--cline`, or `--all` to skip the runtime prompt.
-The GSD SDK CLI (`gsd-sdk`) is installed automatically (required by `/gsd-*` commands). Pass `--no-sdk` to skip the SDK install, or `--sdk` to force a reinstall.
-
-</details>
-
-<details>
-<summary><strong>Minimal Install (local LLMs and token-billed APIs)</strong></summary>
-
-GSD ships 86 skills and 33 subagents. Every runtime (Claude Code, OpenCode, etc.) eagerly enumerates skill descriptions and subagent descriptions into the system prompt on **every turn** — about **~12k tokens** of fixed overhead before you've typed anything. Frontier models with large context (Sonnet 4.6, Opus 4.7 — 200K to 1M ctx) absorb that without a noticeable hit. **Local LLMs with 32K–128K context, and any model where you're paying per token, will feel it.**
-
-Pass `--minimal` (alias `--core-only`) to install only the **main GSD loop**:
-
-```bash
-npx get-shit-done-cc --claude --global --minimal
-# or any other runtime — works the same
-npx get-shit-done-cc --opencode --global --minimal
-```
-
-What you get:
-
-| Surface | Default install | `--minimal` install |
-|---|---|---|
-| Skills | 86 (`new-project`, `discuss-phase`, `plan-phase`, `execute-phase`, …82 more) | **6** (`new-project`, `discuss-phase`, `plan-phase`, `execute-phase`, `help`, `update`) |
-| Subagents | 33 `gsd-*` agents | **0** |
-| Cold-start system-prompt overhead | ~12k tokens | **~700 tokens** (≥94% reduction) |
-| Manifest mode field | `"full"` | `"minimal"` |
-
-The 6 core skills are exactly the ones you need to drive a project from zero: `new-project` to bootstrap, then the `discuss → plan → execute` loop, plus `help` for discovery and `update` to upgrade later.
-
-**This is a hard floor, not a ceiling.** Each `/gsd-*` command you start using and each subagent it dispatches loads its body content into the conversation for that turn — that's normal token use, not eager overhead. But:
-
-> [!IMPORTANT]
-> **The savings disappear the moment you re-install without `--minimal`.** Running `npx get-shit-done-cc@latest` (or `gsd update` from inside a session) without the flag puts the full 86-skill / 33-agent surface back on disk, and every subsequent session pays the full ~12k-token floor again. If you want to stay minimal, **always pass `--minimal` when updating**:
->
-> ```bash
-> npx get-shit-done-cc@latest --claude --global --minimal
-> ```
->
-> Need a specific skill that isn't in the core set (e.g., `gsd-autonomous`, `gsd-ship`, `gsd-debug`)? You have two options:
-> 1. **Permanent expand:** re-install without `--minimal` to get the full surface (and the full token floor).
-> 2. **One-shot:** run the slash command's underlying logic by reading the source from `commands/gsd/<name>.md` in the GSD package and executing it manually — no install change needed.
->
-> Tip: `cat ~/.claude/get-shit-done/.gsd-manifest.json | jq .mode` (or `gsd-file-manifest.json` depending on layout) confirms which mode you're in.
-
-When to use `--minimal`:
-- Local model with 32K–128K context (Qwen3, Llama, Mistral, etc.)
-- Token-metered API where every turn matters
-- Throwaway directory or non-GSD project where you want `/gsd-new-project` available without paying for the rest
-- CI runners or ephemeral containers where install footprint matters
-
-When **not** to use `--minimal`:
-- Active GSD project where you regularly invoke the broader command set (`autonomous`, `ship`, `code-review`, `debug`, etc.) — re-installing each time is friction without payoff.
-- Frontier models with 200K–1M context — the savings are noise.
-
-</details>
-
-<details>
-<summary><strong>Development Installation</strong></summary>
-
-Clone the repository, build hooks, and run the installer locally:
-
-```bash
-git clone https://github.com/gsd-build/get-shit-done.git
-cd get-shit-done
-npm run build:hooks
-node bin/install.js --claude --local
-```
-
-The `build:hooks` step is required — it compiles hook sources into `hooks/dist/` which the installer copies from. Without it, hooks won't be installed and you'll get hook errors in Claude Code. (The npm release handles this automatically via `prepublishOnly`.)
-
-Installs to `./.claude/` for testing modifications before contributing.
-
-</details>
+This fork's legacy install and update paths are retired. Use guarded OpenGSD maintenance for the installed OpenGSD release. Do not run the old npm installer from this checkout.
 
 ### Recommended: Skip Permissions Mode
 
@@ -678,7 +507,7 @@ You're never locked in. The system adapts.
 | `/gsd-progress` | Where am I? What's next? |
 | `/gsd-next` | Auto-detect state and run the next step |
 | `/gsd-help` | Show all commands and usage guide |
-| `/gsd-update` | Update GSD with changelog preview |
+| `/gsd-update` | Legacy update command retired; use guarded OpenGSD maintenance. |
 | `/gsd-join-discord` | Join the GSD Discord community |
 | `/gsd-manager` | Interactive command center for managing multiple phases |
 
@@ -894,76 +723,11 @@ This prevents Claude from reading these files entirely, regardless of what comma
 
 ## Troubleshooting
 
-**Commands not found after install?**
-- Restart your runtime to reload commands/skills
-- Verify files exist in `~/.claude/skills/gsd-*/SKILL.md` or `~/.codex/skills/gsd-*/SKILL.md` for managed global installs
-- For local installs, verify `.claude/skills/gsd-*/SKILL.md` or `./.codex/skills/gsd-*/SKILL.md`
-- Legacy Claude Code installs still use `~/.claude/commands/gsd/`
-
-**Commands not working as expected?**
-- Run `/gsd-help` to verify installation
-- Re-run `npx get-shit-done-cc` to reinstall
-
-**Updating to the latest version?**
-```bash
-npx get-shit-done-cc@latest
-```
-
-**Using Docker or containerized environments?**
-
-If file reads fail with tilde paths (`~/.claude/...`), set `CLAUDE_CONFIG_DIR` before installing:
-```bash
-CLAUDE_CONFIG_DIR=/home/youruser/.claude npx get-shit-done-cc --global
-```
-This ensures absolute paths are used instead of `~` which may not expand correctly in containers.
-
-### Uninstalling
-
-To remove GSD completely:
-
-```bash
-# Global installs
-npx get-shit-done-cc --claude --global --uninstall
-npx get-shit-done-cc --opencode --global --uninstall
-npx get-shit-done-cc --gemini --global --uninstall
-npx get-shit-done-cc --kilo --global --uninstall
-npx get-shit-done-cc --codex --global --uninstall
-npx get-shit-done-cc --copilot --global --uninstall
-npx get-shit-done-cc --cursor --global --uninstall
-npx get-shit-done-cc --windsurf --global --uninstall
-npx get-shit-done-cc --antigravity --global --uninstall
-npx get-shit-done-cc --augment --global --uninstall
-npx get-shit-done-cc --trae --global --uninstall
-npx get-shit-done-cc --qwen --global --uninstall
-npx get-shit-done-cc --hermes --global --uninstall
-npx get-shit-done-cc --codebuddy --global --uninstall
-npx get-shit-done-cc --cline --global --uninstall
-
-# Local installs (current project)
-npx get-shit-done-cc --claude --local --uninstall
-npx get-shit-done-cc --opencode --local --uninstall
-npx get-shit-done-cc --gemini --local --uninstall
-npx get-shit-done-cc --kilo --local --uninstall
-npx get-shit-done-cc --codex --local --uninstall
-npx get-shit-done-cc --copilot --local --uninstall
-npx get-shit-done-cc --cursor --local --uninstall
-npx get-shit-done-cc --windsurf --local --uninstall
-npx get-shit-done-cc --antigravity --local --uninstall
-npx get-shit-done-cc --augment --local --uninstall
-npx get-shit-done-cc --trae --local --uninstall
-npx get-shit-done-cc --qwen --local --uninstall
-npx get-shit-done-cc --hermes --local --uninstall
-npx get-shit-done-cc --codebuddy --local --uninstall
-npx get-shit-done-cc --cline --local --uninstall
-```
-
-This removes all GSD commands, agents, hooks, and settings while preserving your other configurations.
-
----
+This fork's legacy install and update paths are retired. Use guarded OpenGSD maintenance for the installed OpenGSD release. Do not run the old npm installer from this checkout.
 
 ## Community Ports
 
-OpenCode, Gemini CLI, Kilo, and Codex are now natively supported via `npx get-shit-done-cc`.
+Historically, the former get-shit-done-cc installer added native support for OpenCode, Gemini CLI, Kilo, and Codex.
 
 These community ports pioneered multi-runtime support:
 

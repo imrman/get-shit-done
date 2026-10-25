@@ -62,3 +62,45 @@ test('legacy update instructions contain a retirement notice and no install comm
     assert.doesNotMatch(content, /(?:get-shit-done-cc|npm\s+(?:install|i)|npx\s+|git\s+pull)/i);
   }
 });
+
+
+test('retired command cannot import an installed legacy updater', () => {
+  const command = fs.readFileSync(path.join(root, 'commands/gsd/update.md'), 'utf8');
+  assert.doesNotMatch(command, /<execution_context(?:_extended)?>|@~\/\.claude\/get-shit-done\/workflows\/update\.md/);
+  assert.doesNotMatch(command, /allowed-tools:|\bBash\b/);
+});
+
+test('active help, quick and project workflows do not recommend the retired installers', () => {
+  for (const name of [
+    'get-shit-done/workflows/help.md',
+    'get-shit-done/workflows/quick.md',
+    'get-shit-done/workflows/new-project.md',
+    'get-shit-done/workflows/new-milestone.md',
+  ]) {
+    const content = fs.readFileSync(path.join(root, name), 'utf8');
+    assert.doesNotMatch(content, /npx\s+get-shit-done-cc|npm\s+install\s+-g\s+@gsd-build\/sdk/, name);
+  }
+  const help = fs.readFileSync(path.join(root, 'get-shit-done/workflows/help.md'), 'utf8');
+  assert.match(help, /legacy command is retired/i);
+  const quick = fs.readFileSync(path.join(root, 'get-shit-done/workflows/quick.md'), 'utf8');
+  assert.match(quick, /legacy SDK installer is retired/i);
+});
+
+test('active README editions and command references show retirement without executable legacy install lines', () => {
+  for (const name of [
+    'README.md', 'README.ja-JP.md', 'README.ko-KR.md',
+    'README.pt-BR.md', 'README.zh-CN.md', 'docs/zh-CN/README.md',
+  ]) {
+    const content = fs.readFileSync(path.join(root, name), 'utf8');
+    assert.match(content, /OpenGSD/);
+    assert.doesNotMatch(content, /^\s*(?:npx\s+get-shit-done-cc|npm\s+install\s+-g\s+@gsd-build\/sdk)/m, name);
+  }
+  for (const name of [
+    'docs/COMMANDS.md', 'docs/ja-JP/COMMANDS.md',
+    'docs/ko-KR/COMMANDS.md', 'docs/pt-BR/COMMANDS.md',
+  ]) {
+    const content = fs.readFileSync(path.join(root, name), 'utf8');
+    assert.match(content, /OpenGSD/);
+    assert.doesNotMatch(content, /^\s*\/gsd-update\s+#/m, name);
+  }
+});

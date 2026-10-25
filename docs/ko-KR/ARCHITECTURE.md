@@ -168,7 +168,7 @@ GSD는 사용자와 AI 코딩 에이전트(Claude Code, Gemini CLI, OpenCode, Ki
 |------|-------|---------|
 | `gsd-statusline.js` | `statusLine` | 모델, 작업, 디렉터리, 컨텍스트 사용 바 표시 |
 | `gsd-context-monitor.js` | `PostToolUse` / `AfterTool` | 잔여 35%/25% 시점에 에이전트 대면 컨텍스트 경고 주입 |
-| `gsd-check-update.js` | `SessionStart` | 새 GSD 버전을 백그라운드에서 확인 |
+| `gsd-check-update.js` | `SessionStart` | 사용 중단된 업데이트 검사 (동작 없음) |
 | `gsd-prompt-guard.js` | `PreToolUse` | `.planning/` 쓰기 작업에서 프롬프트 인젝션 패턴 스캔 (권고용) |
 | `gsd-workflow-guard.js` | `PreToolUse` | GSD 워크플로우 컨텍스트 외부의 파일 편집 감지 (권고용, `hooks.workflow_guard`로 활성화) |
 
@@ -355,7 +355,7 @@ UI-SPEC.md (per phase) ───────────────────
 ├── hooks/
 │   ├── gsd-statusline.js           # 상태표시줄 훅
 │   ├── gsd-context-monitor.js      # 컨텍스트 경고 훅
-│   └── gsd-check-update.js         # 업데이트 확인 훅
+│   └── gsd-check-update.js         # 사용 중단된 업데이트 검사 훅
 ├── settings.json                   # 훅 등록
 └── VERSION                         # 설치된 버전 번호
 ```
@@ -468,7 +468,7 @@ Runtime Engine (Claude Code / Gemini CLI)
     │
     └── SessionStart event ──► gsd-check-update.js
         Reads: VERSION file
-        Writes: ~/.claude/cache/gsd-update-check.json (spawns background process)
+        Retired: legacy update hook no longer queries the registry or writes a cache
 ```
 
 ### 컨텍스트 모니터 임계값

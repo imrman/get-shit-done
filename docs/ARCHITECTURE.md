@@ -243,8 +243,8 @@ Runtime hooks that integrate with the host AI agent:
 |------|-------|---------|
 | `gsd-statusline.js` | `statusLine` | Displays model, task, directory, and context usage bar |
 | `gsd-context-monitor.js` | `PostToolUse` / `AfterTool` | Injects agent-facing context warnings at 35%/25% remaining |
-| `gsd-check-update.js` | `SessionStart` | Foreground trigger for the background update check |
-| `gsd-check-update-worker.js` | (helper) | Background worker spawned by `gsd-check-update.js`; no direct event registration |
+| `gsd-check-update.js` | `SessionStart` | Retired no-op; no registry query or worker spawn |
+| `gsd-check-update-worker.js` | (helper) | Retired no-op; no registry query or cache write |
 | `gsd-prompt-guard.js` | `PreToolUse` | Scans `.planning/` writes for prompt injection patterns (advisory) |
 | `gsd-read-injection-scanner.js` | `PostToolUse` | Scans Read tool output for injected instructions in untrusted content |
 | `gsd-workflow-guard.js` | `PreToolUse` | Detects file edits outside GSD workflow context (advisory, opt-in via `hooks.workflow_guard`) |
@@ -608,7 +608,7 @@ Runtime Engine (Claude Code / Gemini CLI)
     │
     └── SessionStart event ──► gsd-check-update.js
         Reads: VERSION file
-        Writes: ~/.claude/cache/gsd-update-check.json (spawns background process)
+        Retired: legacy update hook no longer queries the registry or writes a cache
 ```
 
 ### Context Monitor Thresholds

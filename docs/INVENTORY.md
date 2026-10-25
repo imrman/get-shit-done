@@ -157,7 +157,7 @@ These six routers are descriptor-only entries that the model picks first; the bo
 | `/gsd-settings` | Configure GSD workflow toggles and model profile. | [commands/gsd/settings.md](../commands/gsd/settings.md) |
 | `/gsd-config` | Configure GSD settings — workflow toggles (default), advanced knobs (`--advanced`), integrations (`--integrations`), or model profile (`--profile`). | [commands/gsd/config.md](../commands/gsd/config.md) |
 | `/gsd-pr-branch` | Create a clean PR branch by filtering out `.planning/` commits. | [commands/gsd/pr-branch.md](../commands/gsd/pr-branch.md) |
-| `/gsd-update` | Update GSD to latest version; use `--sync` to sync skills across runtimes or `--reapply` to reapply local patches. | [commands/gsd/update.md](../commands/gsd/update.md) |
+| `/gsd-update` | Retired legacy update command; use guarded OpenGSD maintenance. | [commands/gsd/update.md](../commands/gsd/update.md) |
 | `/gsd-help` | Show available GSD commands and usage guide. | [commands/gsd/help.md](../commands/gsd/help.md) |
 
 ---
@@ -222,7 +222,7 @@ Full roster at `get-shit-done/workflows/*.md`. Workflows are thin orchestrators 
 | `profile-user.md` | Orchestrate the full developer profiling flow — consent, session scan, profile generation. | `/gsd-profile-user` |
 | `progress.md` | Progress rendering — project context, position, and next-action routing. | `/gsd-progress` |
 | `quick.md` | Quick-task execution with GSD guarantees (atomic commits, state tracking). | `/gsd-quick` |
-| `reapply-patches.md` | Reapply local modifications after a GSD update. | `/gsd-update --reapply` |
+| `reapply-patches.md` | Historical patch-recovery workflow; legacy update route retired. | Retired |
 | `remove-phase.md` | Remove a future phase from the roadmap and renumber subsequent phases. | `/gsd-phase --remove` |
 | `remove-workspace.md` | Remove a GSD workspace and clean up worktrees. | `/gsd-workspace --remove` |
 | `resume-project.md` | Resume work — restore full context from STATE.md, HANDOFF.json, and artifacts. | `/gsd-resume-work` |
@@ -240,13 +240,13 @@ Full roster at `get-shit-done/workflows/*.md`. Workflows are thin orchestrators 
 | `spike.md` | Rapid feasibility validation through focused, throwaway experiments. | `/gsd-spike` |
 | `spike-wrap-up.md` | Curate spike findings and package them as a persistent `spike-findings-[project]` skill. | `/gsd-spike --wrap-up` |
 | `stats.md` | Project statistics rendering — phases, plans, requirements, git metrics. | `/gsd-stats` |
-| `sync-skills.md` | Cross-runtime GSD skill sync — diff and apply `gsd-*` skill directories across runtime roots. | `/gsd-update --sync` |
+| `sync-skills.md` | Historical sync workflow; legacy update route retired. | Retired |
 | `transition.md` | Phase-boundary transition workflow — workstream checks, state advancement. | `execute-phase.md`, `/gsd-progress --next` |
 | `ui-phase.md` | Generate UI-SPEC.md design contract via gsd-ui-researcher. | `/gsd-ui-phase` |
 | `ui-review.md` | Retroactive 6-pillar visual audit via gsd-ui-auditor. | `/gsd-ui-review` |
 | `ultraplan-phase.md` | [BETA] Offload planning to Claude Code's ultraplan cloud; drafts remotely and imports back via `/gsd-import`. | `/gsd-ultraplan-phase` |
 | `undo.md` | Safe git revert — phase or plan commits using the phase manifest. | `/gsd-undo` |
-| `update.md` | Update GSD to latest version with changelog display. | `/gsd-update` |
+| `update.md` | Retirement notice; no update execution. | `/gsd-update` |
 | `validate-phase.md` | Retroactively audit and fill Nyquist validation gaps for a completed phase. | `/gsd-validate-phase` |
 | `verify-phase.md` | Verify phase goal achievement through goal-backward analysis. | `execute-phase.md` (post-execution) |
 | `verify-work.md` | Conversational UAT with auto-diagnosis — produces UAT.md and fix plans. | `/gsd-verify-work` |
