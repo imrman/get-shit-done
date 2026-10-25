@@ -213,7 +213,7 @@ describe('install.js source correctness', () => {
     assert.ok(gsdHooksMatch, 'uninstall hook list must exist');
     const uninstallHooks = gsdHooksMatch[1];
     const expectedHookNames = [
-      'gsd-check-update.js', 'gsd-statusline.js', 'gsd-session-state.sh',
+      'gsd-check-update.js', 'gsd-check-update-worker.js', 'gsd-statusline.js', 'gsd-session-state.sh',
       'gsd-context-monitor.js', 'gsd-phase-boundary.sh', 'gsd-prompt-guard.js',
       'gsd-read-guard.js', 'gsd-validate-commit.sh', 'gsd-workflow-guard.js',
     ];
@@ -256,6 +256,51 @@ describe('install.js source correctness', () => {
       src.includes('Missing expected hook:'),
       'install should warn about missing .sh hooks after verification'
     );
+  });
+});
+
+describe('Codex uninstall removes only managed worker hooks', () => {
+  let tmpDir;
+
+  beforeEach(() => {
+    tmpDir = createTempDir('gsd-codex-worker-uninstall-');
+  });
+
+  afterEach(() => {
+    cleanup(tmpDir);
+  });
+
+  test('removes the legacy worker and preserves custom and outside same-name files', () => {
+    const syntheticHome = path.join(tmpDir, 'home');
+    const codexHome = path.join(syntheticHome, '.codex');
+    const hooksDir = path.join(codexHome, 'hooks');
+    const outsideHooksDir = path.join(tmpDir, 'outside', 'hooks');
+    const workerPath = path.join(hooksDir, 'gsd-check-update-worker.js');
+    const customHookPath = path.join(hooksDir, 'custom-hook.js');
+    const outsideWorkerPath = path.join(outsideHooksDir, 'gsd-check-update-worker.js');
+    const customHookBytes = Buffer.from('custom hook must survive\n');
+    const outsideWorkerBytes = Buffer.from('outside file must survive\n');
+
+    fs.mkdirSync(hooksDir, { recursive: true });
+    fs.mkdirSync(outsideHooksDir, { recursive: true });
+    fs.writeFileSync(workerPath, 'legacy generated worker stub\n');
+    fs.writeFileSync(customHookPath, customHookBytes);
+    fs.writeFileSync(outsideWorkerPath, outsideWorkerBytes);
+
+    execFileSync(process.execPath, [INSTALL_SRC, '--codex', '--global', '--uninstall'], {
+      cwd: tmpDir,
+      env: {
+        PATH: process.env.PATH,
+        HOME: syntheticHome,
+        CODEX_HOME: codexHome,
+      },
+      encoding: 'utf8',
+      stdio: 'pipe',
+    });
+
+    assert.equal(fs.existsSync(workerPath), false, 'legacy worker should be removed');
+    assert.deepEqual(fs.readFileSync(customHookPath), customHookBytes, 'custom hook bytes should be preserved');
+    assert.deepEqual(fs.readFileSync(outsideWorkerPath), outsideWorkerBytes, 'outside same-name file bytes should be preserved');
   });
 });
 
