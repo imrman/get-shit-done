@@ -77,6 +77,10 @@ function writeCodexConfig(codexHome, content) {
   fs.writeFileSync(path.join(codexHome, 'config.toml'), content, 'utf8');
 }
 
+function managedUpdateHook(codexHome) {
+  return path.join(codexHome, 'hooks', 'gsd-check-update.js').replace(/\\/g, '/');
+}
+
 describe('#2760 defect 3 — Hooks AoT preservation across install/uninstall/reinstall', () => {
   let tmpDir;
   let codexHome;
@@ -186,7 +190,7 @@ describe('#2760 defect 3 — Hooks AoT preservation across install/uninstall/rei
       '# GSD Hooks',
       '[[hooks]]',
       'event = "SessionStart"',
-      'command = "node /old/path/to/gsd-check-update.js"',
+      `command = "node ${managedUpdateHook(codexHome)}"`,
       '',
     ].join('\n');
     writeCodexConfig(codexHome, legacyConfig);
@@ -219,7 +223,7 @@ describe('#2760 defect 3 — Hooks AoT preservation across install/uninstall/rei
       '',
       '# GSD Hooks',
       '[[hooks.SessionStart]]',
-      'command = "node /old/path/to/gsd-check-update.js"',
+      `command = "node ${managedUpdateHook(codexHome)}"`,
       '',
     ].join('\n');
     writeCodexConfig(codexHome, prBranchConfig);
@@ -653,7 +657,7 @@ describe('#2760 CR4 finding 2 — Legacy flat [[hooks]] block migrates to namesp
       '# GSD Hooks',
       '[[hooks]]',
       'event = "SessionStart"',
-      'command = "node /old/path/hooks/gsd-check-update.js"',
+      `command = "node ${managedUpdateHook(codexHome)}"`,
       '',
     ].join('\n');
     writeCodexConfig(codexHome, userPlusLegacy);

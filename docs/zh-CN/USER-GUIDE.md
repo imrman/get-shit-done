@@ -198,7 +198,7 @@
 | `/gsd-resume-work` | 从上次会话恢复完整上下文 | 开始新会话 |
 | `/gsd-pause-work` | 保存上下文交接 | 阶段中途停止 |
 | `/gsd-help` | 显示所有命令 | 快速参考 |
-| `/gsd-update` | 更新 GSD 并预览变更日志 | 检查新版本 |
+| `/gsd-update` | 旧版更新命令已停用；请使用受控的 OpenGSD 维护流程。 | 已停用 |
 | `/gsd-join-discord` | 打开 Discord 社区邀请 | 问题或社区 |
 
 ### 阶段管理
@@ -234,7 +234,7 @@
 | `/gsd-check-todos` | 列出待处理事项 | 查看捕获的想法 |
 | `/gsd-settings` | 配置工作流开关和模型配置 | 更改模型、切换代理 |
 | `/gsd-set-profile <profile>` | 快速切换配置 | 更改成本/质量权衡 |
-| `/gsd-reapply-patches` | 更新后恢复本地修改 | 如果你有本地编辑，在 `/gsd-update` 后 |
+| `/gsd-reapply-patches` | Legacy recovery route retired; use guarded OpenGSD maintenance. | Retired |
 
 ---
 
@@ -487,7 +487,7 @@ node gsd-tools.cjs state sync              # 从磁盘重建 STATE.md
 | 快速针对性修复 | `/gsd-quick` |
 | 计划与你的愿景不符 | `/gsd-discuss-phase [N]` 然后重新规划 |
 | 成本过高 | `/gsd-set-profile budget` 和 `/gsd-settings` 关闭代理 |
-| 更新破坏了本地更改 | `/gsd-reapply-patches` |
+| `/gsd-reapply-patches` | Legacy recovery route retired; use guarded OpenGSD maintenance. | Retired |
 
 ---
 

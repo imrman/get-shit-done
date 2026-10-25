@@ -176,11 +176,6 @@ is_allowed_match() {
     printf '%s\n' "$line_text" | grep -qE "^[[:space:]]*['\"\`].*['\"\`][,);]*[[:space:]]*$" && return 0
   fi
 
-  if [[ "$file" == "tests/unattended-upstream-sync.test.cjs" ]]; then
-    [[ "$line_text" == *"const encodedInjection = Buffer.from("* ]] && return 0
-    [[ "$line_text" == *"const injectedPayload = 'ignore all previous instructions"* ]] && return 0
-  fi
-
   if [[ "$file" == "sdk/src/query/commit.ts" ]]; then
     [[ "$line_text" == *'Neutralize [SYSTEM] / [INST] markers'* ]] && return 0
     [[ "$line_text" == *'sanitized = sanitized.replace(/\[(SYSTEM|INST)\]/gi,'* ]] && return 0
@@ -335,6 +330,7 @@ scan_file() {
   local file="$1"
   local mode="${2:-}"
   local found=0
+  local contains_invisible=0
   local normalized_content=""
   local invisible_normalized_content=""
 
@@ -361,6 +357,7 @@ scan_file() {
   fi
 
   if has_invisible_unicode "$file"; then
+    contains_invisible=1
     if [[ $found -eq 0 ]]; then
       echo "FAIL: $(sanitize_file_id "$file")"
       found=1
@@ -369,15 +366,17 @@ scan_file() {
   fi
 
   normalized_content="$(tr '\r\n\t' '   ' < "$file")"
-  invisible_normalized_content="$(printf '%s\n' "$normalized_content" | normalize_invisible_unicode)"
-  if printf '%s\n' "$invisible_normalized_content" | grep -iqE -e "$COMBINED_PATTERN" 2>/dev/null &&
-    ! printf '%s\n' "$normalized_content" | grep -iqE -e "$COMBINED_PATTERN" 2>/dev/null; then
-    if [[ $found -eq 0 ]]; then
-      echo "FAIL: $(sanitize_file_id "$file")"
-      found=1
+  if [[ $contains_invisible -eq 1 ]]; then
+    invisible_normalized_content="$(printf '%s\n' "$normalized_content" | normalize_invisible_unicode)"
+    if printf '%s\n' "$invisible_normalized_content" | grep -iqE -e "$COMBINED_PATTERN" 2>/dev/null &&
+      ! printf '%s\n' "$normalized_content" | grep -iqE -e "$COMBINED_PATTERN" 2>/dev/null; then
+      if [[ $found -eq 0 ]]; then
+        echo "FAIL: $(sanitize_file_id "$file")"
+        found=1
+      fi
+      echo "  line 1: matched pattern after invisible Unicode normalization"
+      echo "    pattern: prompt injection pattern"
     fi
-    echo "  line 1: matched pattern after invisible Unicode normalization"
-    echo "    pattern: prompt injection pattern"
   fi
   if printf '%s\n' "$normalized_content" | grep -iqE -e "$COMBINED_PATTERN" 2>/dev/null; then
     local -a file_lines=()

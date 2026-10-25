@@ -406,7 +406,7 @@ GSD는 LLM 시스템 프롬프트가 되는 마크다운 파일을 생성합니�
 | `/gsd-pause-work` | 구조화된 핸드오프 저장 (HANDOFF.json + continue-here.md) | 페이즈 중간에 중단할 때 |
 | `/gsd-session-report` | 작업 및 결과가 포함된 세션 요약 생성 | 세션 종료 시, 이해관계자 공유 시 |
 | `/gsd-help` | 모든 명령어 표시 | 빠른 레퍼런스 |
-| `/gsd-update` | 변경 로그 미리보기와 함께 GSD 업데이트 | 새 버전 확인 시 |
+| `/gsd-update` | 이전 업데이트 명령은 사용 중단되었습니다. 검증된 OpenGSD 유지관리 절차를 사용하세요. | Retired |
 | `/gsd-join-discord` | Discord 커뮤니티 초대 링크 열기 | 질문이나 커뮤니티 참여 시 |
 
 ### 페이즈 관리
@@ -432,7 +432,7 @@ GSD는 LLM 시스템 프롬프트가 되는 마크다운 파일을 생성합니�
 | `/gsd-check-todos` | 보류 중인 할 일 목록 | 캡처된 아이디어 검토 시 |
 | `/gsd-settings` | 워크플로우 토글 및 모델 프로필 설정 | 모델 변경, 에이전트 토글 시 |
 | `/gsd-set-profile <profile>` | 빠른 프로필 전환 | 비용/품질 트레이드오프 변경 시 |
-| `/gsd-reapply-patches` | 업데이트 후 로컬 수정사항 복원 | 로컬 편집이 있는 상태에서 `/gsd-update` 이후 |
+| `/gsd-reapply-patches` | Legacy recovery route retired; use guarded OpenGSD maintenance. | Retired |
 
 ### 코드 품질 및 리뷰
 
@@ -801,7 +801,7 @@ Windows에서 설치 프로그램이 `EPERM: operation not permitted, scandir`�
 | 빠른 목표 수정 | `/gsd-quick` |
 | 계획이 비전과 맞지 않음 | `/gsd-discuss-phase [N]` 후 재계획 |
 | 비용이 높아짐 | `/gsd-set-profile budget` 및 `/gsd-settings`에서 에이전트 비활성화 |
-| 업데이트가 로컬 변경사항 파괴 | `/gsd-reapply-patches` |
+| `/gsd-reapply-patches` | Legacy recovery route retired; use guarded OpenGSD maintenance. | Retired |
 | 이해관계자를 위한 세션 요약 필요 | `/gsd-session-report` |
 | 다음 단계를 모르겠음 | `/gsd-next` |
 | 병렬 실행 빌드 오류 | GSD 업데이트 또는 `parallelization.enabled: false` 설정 |

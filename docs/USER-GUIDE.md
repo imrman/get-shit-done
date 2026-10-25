@@ -1046,37 +1046,27 @@ GSD will resolve each agent's tier (`opus`/`sonnet`/`haiku`) to the Codex-native
 
 See the [Configuration Reference](CONFIGURATION.md#non-claude-runtimes-codex-opencode-gemini-cli-kilo) for the full explanation.
 
-### Installing for Cline
+### Legacy Cline Integration
 
 Cline uses a rules-based integration — GSD installs as `.clinerules` rather than slash commands.
 
-```bash
-# Global install (applies to all projects)
-npx get-shit-done-cc --cline --global
-
-# Local install (this project only)
-npx get-shit-done-cc --cline --local
-```
+Legacy update command retired; use guarded OpenGSD maintenance for the installed release.
 
 Global installs write to `~/.cline/`. Local installs write to `./.cline/`. No custom slash commands are registered — GSD rules are loaded automatically by Cline from the rules file.
 
-### Installing for CodeBuddy
+### Legacy CodeBuddy Integration
 
 CodeBuddy uses a skills-based integration.
 
-```bash
-npx get-shit-done-cc --codebuddy --global
-```
+Legacy update command retired; use guarded OpenGSD maintenance for the installed release.
 
 Skills are installed to `~/.codebuddy/skills/gsd-*/SKILL.md`.
 
-### Installing for Qwen Code
+### Legacy Qwen Code Integration
 
 Qwen Code uses the same open skills standard as Claude Code 2.1.88+.
 
-```bash
-npx get-shit-done-cc --qwen --global
-```
+Legacy update command retired; use guarded OpenGSD maintenance for the installed release.
 
 Skills are installed to `~/.qwen/skills/gsd-*/SKILL.md`. Use the `QWEN_CONFIG_DIR` environment variable to override the default install path.
 
@@ -1090,11 +1080,11 @@ Set `commit_docs: false` during `/gsd-new-project` or via `/gsd-settings`. Add `
 
 ### GSD Update Overwrote My Local Changes
 
-Since v1.17, the installer backs up locally modified files to `gsd-local-patches/`. Run `/gsd-reapply-patches` to merge your changes back.
+Historical installs may have saved modified files in `gsd-local-patches/`. Preserve those backups and use guarded OpenGSD maintenance to assess recovery.
 
-### Cannot Update via npm
+### Legacy Update
 
-If `npx get-shit-done-cc` fails due to npm outages or network restrictions, see [docs/manual-update.md](manual-update.md) for a step-by-step manual update procedure that works without npm access.
+The old npm update path and [manual procedure](manual-update.md) are retired. Use guarded OpenGSD maintenance for the installed release.
 
 ### Workflow Diagnostics (`/gsd-forensics`)
 

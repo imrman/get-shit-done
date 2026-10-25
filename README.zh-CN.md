@@ -19,9 +19,7 @@
 
 <br>
 
-```bash
-npx get-shit-done-cc@latest
-```
+此分支的旧安装和更新路径已停用。请使用受控的 OpenGSD 维护流程管理已安装的 OpenGSD，不要运行旧版 npm 安装器。
 
 **支持 Mac、Windows 和 Linux。**
 
@@ -89,107 +87,7 @@ GSD 解决的就是这个问题。它是让 Claude Code 变得可靠的上下文
 
 ## 快速开始
 
-```bash
-npx get-shit-done-cc@latest
-```
-
-安装器会提示你选择：
-1. **运行时**：Claude Code、OpenCode、Gemini、Kilo、Codex、Copilot、Cursor、Windsurf、Antigravity、Augment、Trae、CodeBuddy、Cline，或全部
-2. **安装位置**：全局（所有项目）或本地（仅当前项目）
-
-安装后可这样验证：
-- Claude Code / Gemini / Copilot / Antigravity：`/gsd-help`
-- OpenCode / Kilo / Augment / Trae / CodeBuddy：`/gsd-help`
-- Codex：`$gsd-help`
-- Cline：GSD 通过 `.clinerules` 安装 — 检查 `.clinerules` 是否存在
-
-> [!NOTE]
-> Claude Code 2.1.88+ 和 Codex 以 skill 形式安装（`skills/gsd-*/SKILL.md`）。Cline 使用 `.clinerules`。安装器会自动处理所有格式。
-
-> [!TIP]
-> 基于源码安装或无法使用 npm 的环境，请参阅 **[docs/manual-update.md](docs/manual-update.md)**。
-
-### 保持更新
-
-GSD 迭代很快，建议定期更新：
-
-```bash
-npx get-shit-done-cc@latest
-```
-
-<details>
-<summary><strong>非交互式安装（Docker、CI、脚本）</strong></summary>
-
-```bash
-# Claude Code
-npx get-shit-done-cc --claude --global   # 安装到 ~/.claude/
-npx get-shit-done-cc --claude --local    # 安装到 ./.claude/
-
-# OpenCode
-npx get-shit-done-cc --opencode --global # 安装到 ~/.config/opencode/
-
-# Gemini CLI
-npx get-shit-done-cc --gemini --global   # 安装到 ~/.gemini/
-
-# Kilo
-npx get-shit-done-cc --kilo --global     # 安装到 ~/.config/kilo/
-npx get-shit-done-cc --kilo --local      # 安装到 ./.kilo/
-
-# Codex
-npx get-shit-done-cc --codex --global    # 安装到 ~/.codex/
-npx get-shit-done-cc --codex --local     # 安装到 ./.codex/
-
-# Copilot
-npx get-shit-done-cc --copilot --global  # 安装到 ~/.github/
-npx get-shit-done-cc --copilot --local   # 安装到 ./.github/
-
-# Cursor CLI
-npx get-shit-done-cc --cursor --global   # 安装到 ~/.cursor/
-npx get-shit-done-cc --cursor --local    # 安装到 ./.cursor/
-
-# Antigravity
-npx get-shit-done-cc --antigravity --global # 安装到 ~/.gemini/antigravity/
-npx get-shit-done-cc --antigravity --local  # 安装到 ./.agent/
-
-# Augment
-npx get-shit-done-cc --augment --global     # 安装到 ~/.augment/
-npx get-shit-done-cc --augment --local      # 安装到 ./.augment/
-
-# Trae
-npx get-shit-done-cc --trae --global     # 安装到 ~/.trae/
-npx get-shit-done-cc --trae --local      # 安装到 ./.trae/
-
-# CodeBuddy
-npx get-shit-done-cc --codebuddy --global # 安装到 ~/.codebuddy/
-npx get-shit-done-cc --codebuddy --local  # 安装到 ./.codebuddy/
-
-# Cline
-npx get-shit-done-cc --cline --global       # 安装到 ~/.cline/
-npx get-shit-done-cc --cline --local        # 安装到 ./.clinerules
-
-# 所有运行时
-npx get-shit-done-cc --all --global      # 安装到所有目录
-```
-
-使用 `--global`（`-g`）或 `--local`（`-l`）可以跳过安装位置提示。
-使用 `--claude`、`--opencode`、`--gemini`、`--kilo`、`--codex`、`--copilot`、`--cursor`、`--windsurf`、`--antigravity`、`--augment`、`--trae`、`--codebuddy`、`--cline` 或 `--all` 可以跳过运行时提示。
-
-</details>
-
-<details>
-<summary><strong>开发安装</strong></summary>
-
-克隆仓库并在本地运行安装器：
-
-```bash
-git clone https://github.com/gsd-build/get-shit-done.git
-cd get-shit-done
-node bin/install.js --claude --local
-```
-
-这样会安装到 `./.claude/`，方便你在贡献代码前测试自己的改动。
-
-</details>
+此分支的旧安装和更新路径已停用。请使用受控的 OpenGSD 维护流程管理已安装的 OpenGSD，不要运行旧版 npm 安装器。
 
 ### 推荐：跳过权限确认模式
 
@@ -576,7 +474,7 @@ lmn012o feat(08-02): create registration endpoint
 | `/gsd-progress` | 我现在在哪？下一步是什么？ |
 | `/gsd-next` | 自动检测状态并执行下一步 |
 | `/gsd-help` | 显示全部命令和使用指南 |
-| `/gsd-update` | 更新 GSD，并预览变更日志 |
+| `/gsd-update` | 旧版更新命令已停用；请使用受控的 OpenGSD 维护流程。 |
 | `/gsd-join-discord` | 加入 GSD Discord 社区 |
 
 ### Brownfield
@@ -747,67 +645,11 @@ GSD 的代码库映射和分析命令会读取文件来理解你的项目。**�
 
 ## 故障排查
 
-**安装后找不到命令？**
-- 重启你的运行时，让命令或 skills 重新加载
-- 检查文件是否存在于 `~/.claude/commands/gsd/`（全局）或 `./.claude/commands/gsd/`（本地）
-- 对 Codex，检查 skills 是否存在于 `~/.codex/skills/gsd-*/SKILL.md`（全局）或 `./.codex/skills/gsd-*/SKILL.md`（本地）
-
-**命令行为不符合预期？**
-- 运行 `/gsd-help` 确认安装成功
-- 重新执行 `npx get-shit-done-cc` 进行重装
-
-**想更新到最新版本？**
-```bash
-npx get-shit-done-cc@latest
-```
-
-**在 Docker 或容器环境中使用？**
-
-如果使用波浪线路径（`~/.claude/...`）时读取失败，请在安装前设置 `CLAUDE_CONFIG_DIR`：
-```bash
-CLAUDE_CONFIG_DIR=/home/youruser/.claude npx get-shit-done-cc --global
-```
-这样可以确保使用绝对路径，而不是在容器里可能无法正确展开的 `~`。
-
-### 卸载
-
-如果你想彻底移除 GSD：
-
-```bash
-# 全局安装
-npx get-shit-done-cc --claude --global --uninstall
-npx get-shit-done-cc --opencode --global --uninstall
-npx get-shit-done-cc --gemini --global --uninstall
-npx get-shit-done-cc --kilo --global --uninstall
-npx get-shit-done-cc --codex --global --uninstall
-npx get-shit-done-cc --copilot --global --uninstall
-npx get-shit-done-cc --cursor --global --uninstall
-npx get-shit-done-cc --antigravity --global --uninstall
-npx get-shit-done-cc --augment --global --uninstall
-npx get-shit-done-cc --trae --global --uninstall
-npx get-shit-done-cc --cline --global --uninstall
-
-# 本地安装（当前项目）
-npx get-shit-done-cc --claude --local --uninstall
-npx get-shit-done-cc --opencode --local --uninstall
-npx get-shit-done-cc --gemini --local --uninstall
-npx get-shit-done-cc --kilo --local --uninstall
-npx get-shit-done-cc --codex --local --uninstall
-npx get-shit-done-cc --copilot --local --uninstall
-npx get-shit-done-cc --cursor --local --uninstall
-npx get-shit-done-cc --antigravity --local --uninstall
-npx get-shit-done-cc --augment --local --uninstall
-npx get-shit-done-cc --trae --local --uninstall
-npx get-shit-done-cc --cline --local --uninstall
-```
-
-这会移除所有 GSD 命令、代理、hooks 和设置，但会保留你其他配置。
-
----
+此分支的旧安装和更新路径已停用。请使用受控的 OpenGSD 维护流程管理已安装的 OpenGSD，不要运行旧版 npm 安装器。
 
 ## 社区移植版本
 
-OpenCode、Gemini CLI、Kilo 和 Codex 现在都已经通过 `npx get-shit-done-cc` 获得原生支持。
+旧版 get-shit-done-cc 安装器曾提供 OpenCode、Gemini CLI、Kilo 和 Codex 的原生支持。
 
 这些社区移植版本曾率先探索多运行时支持：
 

@@ -19,9 +19,7 @@
 
 <br>
 
-```bash
-npx get-shit-done-cc@latest
-```
+このフォークの旧インストール・更新手順は廃止されました。インストール済みの OpenGSD は、ガード付きの OpenGSD メンテナンス手順で管理してください。旧 npm インストーラーは実行しないでください。
 
 **Mac、Windows、Linuxで動作します。**
 
@@ -91,103 +89,7 @@ GSDはそれを解決します。Claude Codeを信頼性の高いものにする
 
 ## はじめに
 
-```bash
-npx get-shit-done-cc@latest
-```
-
-インストーラーが以下の選択を求めます：
-1. **ランタイム** — Claude Code、OpenCode、Gemini、Kilo、Codex、Copilot、Cursor、Windsurf、Antigravity、Augment、Trae、Cline、またはすべて（インタラクティブ複数選択 — 1回のインストールセッションで複数のランタイムを選択可能）
-2. **インストール先** — グローバル（全プロジェクト）またはローカル（現在のプロジェクトのみ）
-
-確認方法：
-- Claude Code / Gemini / Copilot / Antigravity: `/gsd-help`
-- OpenCode / Kilo / Augment / Trae: `/gsd-help`
-- Codex: `$gsd-help`
-- Cline: GSDは`.clinerules`経由でインストール — `.clinerules`の存在を確認
-
-> [!NOTE]
-> Claude Code 2.1.88+とCodexはスキル（`skills/gsd-*/SKILL.md`）としてインストールされます。Clineは`.clinerules`を使用します。インストーラーがすべての形式を自動的に処理します。
-
-> [!TIP]
-> ソースベースのインストールやnpmが利用できない環境については、**[docs/manual-update.md](docs/manual-update.md)**を参照してください。
-
-### 最新の状態を保つ
-
-GSDは急速に進化しています。定期的にアップデートしてください：
-
-```bash
-npx get-shit-done-cc@latest
-```
-
-<details>
-<summary><strong>非インタラクティブインストール（Docker、CI、スクリプト）</strong></summary>
-
-```bash
-# Claude Code
-npx get-shit-done-cc --claude --global   # ~/.claude/ にインストール
-npx get-shit-done-cc --claude --local    # ./.claude/ にインストール
-
-# OpenCode
-npx get-shit-done-cc --opencode --global # ~/.config/opencode/ にインストール
-
-# Gemini CLI
-npx get-shit-done-cc --gemini --global   # ~/.gemini/ にインストール
-
-# Kilo
-npx get-shit-done-cc --kilo --global     # ~/.config/kilo/ にインストール
-npx get-shit-done-cc --kilo --local      # ./.kilo/ にインストール
-
-# Codex
-npx get-shit-done-cc --codex --global    # ~/.codex/ にインストール
-npx get-shit-done-cc --codex --local     # ./.codex/ にインストール
-
-# Copilot
-npx get-shit-done-cc --copilot --global  # ~/.github/ にインストール
-npx get-shit-done-cc --copilot --local   # ./.github/ にインストール
-
-# Cursor CLI
-npx get-shit-done-cc --cursor --global      # ~/.cursor/ にインストール
-npx get-shit-done-cc --cursor --local       # ./.cursor/ にインストール
-
-# Antigravity
-npx get-shit-done-cc --antigravity --global # ~/.gemini/antigravity/ にインストール
-npx get-shit-done-cc --antigravity --local  # ./.agent/ にインストール
-
-# Augment
-npx get-shit-done-cc --augment --global     # ~/.augment/ にインストール
-npx get-shit-done-cc --augment --local      # ./.augment/ にインストール
-
-# Trae
-npx get-shit-done-cc --trae --global        # ~/.trae/ にインストール
-npx get-shit-done-cc --trae --local         # ./.trae/ にインストール
-
-# Cline
-npx get-shit-done-cc --cline --global       # ~/.cline/ にインストール
-npx get-shit-done-cc --cline --local        # ./.clinerules にインストール
-
-# 全ランタイム
-npx get-shit-done-cc --all --global      # すべてのディレクトリにインストール
-```
-
-`--global`（`-g`）または `--local`（`-l`）でインストール先の質問をスキップできます。
-`--claude`、`--opencode`、`--gemini`、`--kilo`、`--codex`、`--copilot`、`--cursor`、`--windsurf`、`--antigravity`、`--augment`、`--trae`、`--cline`、または `--all` でランタイムの質問をスキップできます。
-
-</details>
-
-<details>
-<summary><strong>開発用インストール</strong></summary>
-
-リポジトリをクローンしてインストーラーをローカルで実行します：
-
-```bash
-git clone https://github.com/gsd-build/get-shit-done.git
-cd get-shit-done
-node bin/install.js --claude --local
-```
-
-コントリビュートする前に変更をテストするため、`./.claude/` にインストールされます。
-
-</details>
+このフォークの旧インストール・更新手順は廃止されました。インストール済みの OpenGSD は、ガード付きの OpenGSD メンテナンス手順で管理してください。旧 npm インストーラーは実行しないでください。
 
 ### 推奨：パーミッションスキップモード
 
@@ -583,7 +485,7 @@ lmn012o feat(08-02): create registration endpoint
 | `/gsd-progress` | 今どこにいる？次は何？ |
 | `/gsd-next` | 状態を自動検出し次のステップを実行 |
 | `/gsd-help` | 全コマンドと使い方ガイドを表示 |
-| `/gsd-update` | チェンジログプレビュー付きでGSDをアップデート |
+| `/gsd-update` | 旧更新コマンドは廃止されました。OpenGSD のガード付きメンテナンスを使用してください。 |
 | `/gsd-join-discord` | GSD Discordコミュニティに参加 |
 | `/gsd-manager` | 複数フェーズ管理用のインタラクティブコマンドセンター |
 
@@ -779,63 +681,11 @@ GSDのコードベースマッピングおよび分析コマンドは、プロ�
 
 ## トラブルシューティング
 
-**インストール後にコマンドが見つからない？**
-- ランタイムを再起動してコマンド/スキルを再読み込みしてください
-- `~/.claude/commands/gsd/`（グローバル）または `./.claude/commands/gsd/`（ローカル）にファイルが存在するか確認してください
-- Codexの場合、`~/.codex/skills/gsd-*/SKILL.md`（グローバル）または `./.codex/skills/gsd-*/SKILL.md`（ローカル）にスキルが存在するか確認してください
-
-**コマンドが期待通りに動作しない？**
-- `/gsd-help` を実行してインストールを確認してください
-- `npx get-shit-done-cc` を再実行して再インストールしてください
-
-**最新バージョンへのアップデート？**
-```bash
-npx get-shit-done-cc@latest
-```
-
-**Dockerまたはコンテナ化環境を使用している？**
-
-チルダパス（`~/.claude/...`）でファイル読み取りが失敗する場合、インストール前に `CLAUDE_CONFIG_DIR` を設定してください：
-```bash
-CLAUDE_CONFIG_DIR=/home/youruser/.claude npx get-shit-done-cc --global
-```
-これにより、コンテナ内で正しく展開されない可能性がある `~` の代わりに絶対パスが使用されます。
-
-### アンインストール
-
-GSDを完全に削除するには：
-
-```bash
-# グローバルインストール
-npx get-shit-done-cc --claude --global --uninstall
-npx get-shit-done-cc --opencode --global --uninstall
-npx get-shit-done-cc --gemini --global --uninstall
-npx get-shit-done-cc --kilo --global --uninstall
-npx get-shit-done-cc --codex --global --uninstall
-npx get-shit-done-cc --copilot --global --uninstall
-npx get-shit-done-cc --cursor --global --uninstall
-npx get-shit-done-cc --antigravity --global --uninstall
-npx get-shit-done-cc --trae --global --uninstall
-
-# ローカルインストール（現在のプロジェクト）
-npx get-shit-done-cc --claude --local --uninstall
-npx get-shit-done-cc --opencode --local --uninstall
-npx get-shit-done-cc --gemini --local --uninstall
-npx get-shit-done-cc --kilo --local --uninstall
-npx get-shit-done-cc --codex --local --uninstall
-npx get-shit-done-cc --copilot --local --uninstall
-npx get-shit-done-cc --cursor --local --uninstall
-npx get-shit-done-cc --antigravity --local --uninstall
-npx get-shit-done-cc --trae --local --uninstall
-```
-
-これにより、他の設定を保持しながら、すべてのGSDコマンド、エージェント、フック、設定が削除されます。
-
----
+このフォークの旧インストール・更新手順は廃止されました。インストール済みの OpenGSD は、ガード付きの OpenGSD メンテナンス手順で管理してください。旧 npm インストーラーは実行しないでください。
 
 ## コミュニティポート
 
-OpenCode、Gemini CLI、Kilo、Codexは `npx get-shit-done-cc` でネイティブサポートされています。
+旧 get-shit-done-cc インストーラーは、OpenCode、Gemini CLI、Kilo、Codex のネイティブサポートを提供していました。
 
 以下のコミュニティポートがマルチランタイムサポートの先駆けとなりました：
 

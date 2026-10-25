@@ -396,20 +396,54 @@ test('requires source package, installed VERSION, and declared version to agree 
 });
 
 test('rejects a managed file mutated concurrently while it is being copied', () => {
-  const f = fixture(`
-const { spawn } = require('node:child_process');
-const raceFile = path.join(target, 'get-shit-done', 'race.bin');
-write('get-shit-done/race.bin', Buffer.alloc(8 * 1024 * 1024, 0x41));
-const racer = spawn(process.execPath, ['-e',
-  'const fs=require("node:fs");const p=process.argv[1];const end=Date.now()+3000;let x=0;while(Date.now()<end){fs.writeFileSync(p,Buffer.alloc(8*1024*1024,x++&255));}',
-  raceFile,
-], { detached: true, stdio: 'ignore' });
-racer.unref();
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'secure-codex-bundle-race-hook-'));
+  const preload = path.join(base, 'race-read-hook.cjs');
+  fs.writeFileSync(preload, `
+const fs = require('node:fs');
+if (process.argv[1] !== process.env.GSD_RACE_BUILDER_SCRIPT) return;
+fs.appendFileSync(process.env.GSD_RACE_TRACE_FILE, 'builder\\n');
+const originalOpenSync = fs.openSync;
+const originalFstatSync = fs.fstatSync;
+const originalReadFileSync = fs.readFileSync;
+const raceDescriptors = new Set();
+fs.openSync = function (file, ...args) {
+  const descriptor = originalOpenSync.call(this, file, ...args);
+  const stat = originalFstatSync.call(this, descriptor, { bigint: true });
+  try {
+    const raceStat = fs.statSync(process.env.GSD_RACE_FILE, { bigint: true });
+    if (stat.dev === raceStat.dev && stat.ino === raceStat.ino) {
+      raceDescriptors.add(descriptor);
+    }
+  } catch (error) {
+    if (error.code !== 'ENOENT') throw error;
+  }
+  return descriptor;
+};
+fs.readFileSync = function (file, ...args) {
+  if (typeof file === 'number' && raceDescriptors.has(file)) {
+    raceDescriptors.delete(file);
+    fs.writeFileSync(process.env.GSD_RACE_FILE, Buffer.alloc(8 * 1024 * 1024, 0x42));
+    fs.appendFileSync(process.env.GSD_RACE_TRACE_FILE, 'mutated-at-read\\n');
+  }
+  return originalReadFileSync.call(this, file, ...args);
+};
 `);
-  const result = run(f, 'file-race');
+  const f = fixture(`
+write('get-shit-done/race.bin', Buffer.alloc(8 * 1024 * 1024, 0x41));
+`);
+  const raceFile = path.join(f.base, 'stage-file-race', 'get-shit-done', 'race.bin');
+  const result = run(f, 'file-race', {
+    env: {
+      NODE_OPTIONS: `--require=${preload}`,
+      GSD_RACE_BUILDER_SCRIPT: SCRIPT,
+      GSD_RACE_FILE: raceFile,
+      GSD_RACE_TRACE_FILE: path.join(base, 'race-hook-trace'),
+    },
+  });
   assert.notEqual(result.status, 0, result.stderr + result.stdout);
-  assert.match(result.stderr, /changed|race|unstable|identity/i);
+  assert.ok(result.stderr.includes('File changed while building bundle: get-shit-done/race.bin'), result.stderr + result.stdout);
   assert.equal(fs.existsSync(result.output), false);
+  assert.equal(fs.readFileSync(path.join(base, 'race-hook-trace'), 'utf8'), 'builder\nmutated-at-read\n');
 });
 
 test('replaces only approved generated Codex-home paths with an unambiguous placeholder', async (t) => {

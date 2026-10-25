@@ -7,7 +7,7 @@
  * fallback, so missing gsd-sdk caused an immediate abort with no helpful message.
  *
  * Fix: Step 2 must check for gsd-sdk in PATH before invoking it. If absent,
- * emit a human-readable error pointing users to the install command.
+ * emit a human-readable error pointing users to guarded OpenGSD maintenance.
  */
 
 'use strict';
@@ -50,16 +50,16 @@ describe('bug #2334: quick workflow gsd-sdk pre-flight check', () => {
     );
   });
 
-  test('pre-flight error message references the install command', () => {
+  test('pre-flight error message points to guarded maintenance', () => {
     content = content || fs.readFileSync(WORKFLOW_PATH, 'utf-8');
     const step2Start = content.indexOf('**Step 2:');
     const firstSdkCall = content.indexOf('gsd-sdk query init.quick', step2Start);
     const step2Section = content.slice(step2Start, firstSdkCall);
 
-    const hasInstallHint = step2Section.includes('@gsd-build/sdk') || step2Section.includes('gsd-update') || step2Section.includes('/gsd-update');
+    const hasMaintenanceHint = step2Section.includes('guarded OpenGSD maintenance');
     assert.ok(
-      hasInstallHint,
-      'Pre-flight error must include a hint on how to install gsd-sdk (npm install -g @gsd-build/sdk or /gsd-update)'
+      hasMaintenanceHint,
+      'Pre-flight error must direct users to guarded OpenGSD maintenance'
     );
   });
 });

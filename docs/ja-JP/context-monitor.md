@@ -60,7 +60,7 @@ GSD の `/gsd-pause-work` コマンドは実行状態を保存します。WARNIN
 
 ## セットアップ
 
-両フックは `npx get-shit-done-cc` のインストール時に自動的に登録されます:
+旧インストーラーは両フックを登録していました。旧更新チェックとバナーは現在無効です:
 
 - **ステータスライン**（ブリッジファイルの書き込み）: settings.json の `statusLine` として登録
 - **コンテキストモニター**（ブリッジファイルの読み取り）: settings.json の `PostToolUse` フックとして登録（Gemini では `AfterTool`）

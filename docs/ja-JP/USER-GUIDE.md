@@ -406,7 +406,7 @@ GSD はマークダウンファイルを生成し、それが LLM のシステ�
 | `/gsd-pause-work` | 構造化されたハンドオフを保存（HANDOFF.json + continue-here.md） | フェーズの途中で作業を中断する時 |
 | `/gsd-session-report` | 作業内容と成果を含むセッションサマリーを生成 | セッション終了時、ステークホルダーへの共有時 |
 | `/gsd-help` | すべてのコマンドを表示 | クイックリファレンス |
-| `/gsd-update` | 変更履歴プレビュー付きで GSD を更新 | 新バージョンの確認時 |
+| `/gsd-update` | 旧更新コマンドは廃止されました。ガード付きの OpenGSD メンテナンス手順を使用してください。 | Retired |
 | `/gsd-join-discord` | Discord コミュニティの招待リンクを開く | 質問やコミュニティ参加時 |
 
 ### フェーズ管理
@@ -432,7 +432,7 @@ GSD はマークダウンファイルを生成し、それが LLM のシステ�
 | `/gsd-check-todos` | 保留中の TODO を一覧表示 | 記録したアイデアのレビュー |
 | `/gsd-settings` | ワークフロートグルとモデルプロファイルを設定 | モデル変更、エージェントのトグル |
 | `/gsd-set-profile <profile>` | クイックプロファイル切り替え | コスト/品質トレードオフの変更 |
-| `/gsd-reapply-patches` | アップデート後にローカル変更を復元 | ローカル編集がある場合の `/gsd-update` 後 |
+| `/gsd-reapply-patches` | Legacy recovery route retired; use guarded OpenGSD maintenance. | Retired |
 
 ### コード品質とレビュー
 
@@ -801,7 +801,7 @@ Windows でインストーラーが `EPERM: operation not permitted, scandir` �
 | ターゲットを絞った修正 | `/gsd-quick` |
 | プランがビジョンに合わない | `/gsd-discuss-phase [N]` で再プランニング |
 | コストが高い | `/gsd-set-profile budget` と `/gsd-settings` でエージェントをオフ |
-| アップデートがローカル変更を壊した | `/gsd-reapply-patches` |
+| `/gsd-reapply-patches` | Legacy recovery route retired; use guarded OpenGSD maintenance. | Retired |
 | ステークホルダー向けセッションサマリーが欲しい | `/gsd-session-report` |
 | 次のステップがわからない | `/gsd-next` |
 | 並列実行でビルドエラー | GSD を更新するか `parallelization.enabled: false` を設定 |

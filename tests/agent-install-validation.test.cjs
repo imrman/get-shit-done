@@ -143,6 +143,20 @@ describe('validate health: agent installation check W010 (#1371)', () => {
     cleanup(tmpDir);
   });
 
+  test('W010 directs missing and partial agent installs to guarded maintenance', () => {
+    const agentsDir = path.join(tmpDir, 'missing-agents');
+    const expectedFix = 'Use guarded OpenGSD maintenance for the installed release.';
+    const missing = runGsdTools('validate health --raw', tmpDir, { GSD_AGENTS_DIR: agentsDir });
+    assert.ok(missing.success, missing.error);
+    assert.equal(JSON.parse(missing.output).warnings.find(w => w.code === 'W010')?.fix, expectedFix);
+
+    fs.mkdirSync(agentsDir);
+    fs.writeFileSync(path.join(agentsDir, `${EXPECTED_AGENTS[0]}.md`), 'agent\n');
+    const partial = runGsdTools('validate health --raw', tmpDir, { GSD_AGENTS_DIR: agentsDir });
+    assert.ok(partial.success, partial.error);
+    assert.equal(JSON.parse(partial.output).warnings.find(w => w.code === 'W010')?.fix, expectedFix);
+  });
+
   test('health check reports healthy when agents are installed (repo layout)', () => {
     // In the repo, agents/ exists as a sibling of get-shit-done/, so the
     // health check should find them via the gsd-tools.cjs path resolution

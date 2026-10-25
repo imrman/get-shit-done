@@ -786,21 +786,7 @@ Claude Code 세션 분석을 통해 8개 차원(커뮤니케이션 스타일, �
 
 ## 업데이트 명령어
 
-### `/gsd-update`
-
-변경 로그 미리보기와 함께 GSD를 업데이트합니다.
-
-```bash
-/gsd-update                         # 업데이트 확인 및 설치
-```
-
-### `/gsd-reapply-patches`
-
-GSD 업데이트 후 로컬 수정사항을 복원합니다.
-
-```bash
-/gsd-reapply-patches                # 로컬 변경사항 병합
-```
+이 포크의 `/gsd-update`는 사용 중단되었습니다. 설치된 OpenGSD의 검증된 유지관리 절차를 사용하세요.
 
 ---
 

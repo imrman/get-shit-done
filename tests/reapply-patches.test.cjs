@@ -301,49 +301,6 @@ describe('reapply-patches workflow contract (#1469)', () => {
     assert.ok(!fs.existsSync(oldPath), 'reapply-patches.md should be deleted (absorbed into update.md)');
   });
 
-  test('update.md argument-hint declares --reapply as consolidated entry point', () => {
-    // Structural: parse frontmatter, then tokenize the argument-hint pipes
-    // and assert --reapply is one of the documented flags (no raw substring
-    // matching on prose, per the no-source-grep contract).
-    const updatePath = path.join(__dirname, '..', 'commands', 'gsd', 'update.md');
-    const content = fs.readFileSync(updatePath, 'utf8');
-    const argHint = parseFrontmatterField(content, 'argument-hint');
-    assert.ok(argHint, 'update.md frontmatter must declare argument-hint');
-    // argument-hint may include multiple bracketed segments; pull every
-    // `--flag` token out of any bracketed section to assert on a parsed
-    // flag set rather than the surrounding punctuation.
-    const bracketed = [...argHint.matchAll(/\[([^\]]*)\]/g)].map((m) => m[1]);
-    const flagList = bracketed
-      .flatMap((seg) => seg.split('|').map((s) => s.trim().split(/\s+/)[0]))
-      .filter((tok) => tok.startsWith('--'));
-    assert.ok(
-      flagList.includes('--reapply'),
-      `update.md argument-hint flag list must include --reapply; got: ${JSON.stringify(flagList)}`
-    );
-  });
-
-  test('update.md @-include declares the reapply-patches workflow as a dependency', () => {
-    // Structural: scan ALL <execution_context> and <execution_context_extended>
-    // blocks for an `@~/.../workflows/reapply-patches.md` include. The earlier
-    // substring check tolerated incidental mentions in prose; matching only the
-    // first context block missed the _extended block where the delegate lives.
-    const updatePath = path.join(__dirname, '..', 'commands', 'gsd', 'update.md');
-    const content = fs.readFileSync(updatePath, 'utf8');
-    const blocks = [
-      ...content.matchAll(/<execution_context(?:_extended)?>([\s\S]*?)<\/execution_context(?:_extended)?>/g),
-    ].map((m) => m[1]);
-    assert.ok(blocks.length > 0, 'update.md must define at least one <execution_context> block');
-    const includes = blocks
-      .flatMap((blk) => blk.split('\n'))
-      .map((l) => l.trim())
-      .filter((l) => l.startsWith('@'))
-      .map((l) => l.replace(/^@/, ''));
-    const declaresReapply = includes.some((p) => /(^|\/)workflows\/reapply-patches\.md$/.test(p));
-    assert.ok(
-      declaresReapply,
-      `update.md execution_context blocks must @-include workflows/reapply-patches.md; got: ${JSON.stringify(includes)}`
-    );
-  });
 });
 
 // #2790: reapply-patches.md (the command file which contained the inline workflow)

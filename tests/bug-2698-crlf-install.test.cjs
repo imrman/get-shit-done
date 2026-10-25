@@ -62,13 +62,15 @@ describe('#2698: CRLF stale gsd-update-check block is removed on Codex reinstall
   // using the given line ending for the stale hooks block header, and a potentially
   // different EOL for the hooks body. This exercises the cross-platform mixed scenario.
   function writeCodexConfigWithStaleHooks(dir, headerEol, bodyEol) {
+    // chdir resolves /var to /private/var on macOS; match the installer's target identity.
+    const managedHook = path.join(fs.realpathSync(dir), '.codex', 'hooks', 'gsd-update-check.js').replace(/\\/g, '/');
     // Build the stale block with header EOL for the "# GSD Hooks" line, but body EOL
     // for the content lines (simulates a file edited by two different platforms).
     const staleBlock = [
       '# GSD Hooks',           // line that starts the stale section
       '[[hooks]]',
       'event = "SessionStart"',
-      'command = "node /old/path/gsd-update-check.js"',
+      `command = "node ${managedHook}"`,
     ].join(bodyEol);
 
     // Put the stale block in user content BEFORE the GSD marker. The GSD marker area
@@ -153,5 +155,27 @@ describe('#2698: CRLF stale gsd-update-check block is removed on Codex reinstall
         'Fix consolidates to a single \\r?\\n-aware regex.',
       ].join(' ')
     );
+  });
+
+  test('foreign same-basename hook is preserved during reinstall', (t) => {
+    const origCwd = process.cwd();
+    t.after(() => { process.chdir(origCwd); });
+    process.chdir(tmpDir);
+
+    const foreignHook = path.join(tmpDir, 'foreign', 'hooks', 'gsd-update-check.js').replace(/\\/g, '/');
+    const configPath = path.join(tmpDir, '.codex', 'config.toml');
+    fs.mkdirSync(path.dirname(configPath), { recursive: true });
+    fs.writeFileSync(configPath, [
+      '[features]',
+      'codex_hooks = true',
+      '',
+      '[[hooks]]',
+      'event = "SessionStart"',
+      `command = "node ${foreignHook}"`,
+      '',
+    ].join('\n'));
+
+    install(false, 'codex');
+    assert.ok(fs.readFileSync(configPath, 'utf-8').includes(foreignHook), 'foreign hook identity must be preserved');
   });
 });

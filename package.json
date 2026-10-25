@@ -67,8 +67,6 @@
     "changeset": "node scripts/changeset/new.cjs",
     "changelog:render": "node scripts/changeset/cli.cjs render",
     "test": "node scripts/run-tests.cjs",
-    "test:coverage": "c8 --check-coverage --lines 70 --reporter text --include 'get-shit-done/bin/lib/*.cjs' --exclude 'tests/**' --all node scripts/run-tests.cjs",
-    "sync:upstream:unattended": "bash scripts/unattended-upstream-sync.sh",
-    "sync:upstream:dry-run": "bash scripts/unattended-upstream-sync.sh --dry-run"
+    "test:coverage": "c8 --check-coverage --lines 70 --reporter text --include 'get-shit-done/bin/lib/*.cjs' --exclude 'tests/**' --all node scripts/run-tests.cjs"
   }
 }

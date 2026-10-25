@@ -987,20 +987,7 @@ Audit an executed AI phase's evaluation coverage and produce an EVAL-REVIEW.md r
 
 ## Update Commands
 
-### `/gsd-update`
-
-Update GSD with changelog preview, and optionally sync skills or reapply local patches.
-
-| Flag | Description |
-|------|-------------|
-| `--sync` | Sync skills from the GSD registry after updating |
-| `--reapply` | Restore local modifications (patches) after updating |
-
-```bash
-/gsd-update                         # Check for updates and install
-/gsd-update --sync                  # Update and sync skills
-/gsd-update --reapply               # Update and reapply local patches
-```
+`/gsd-update` is retired in this fork. Use guarded OpenGSD maintenance for the installed OpenGSD release. Its former `--sync` and `--reapply` update modes are unavailable.
 
 ---
 

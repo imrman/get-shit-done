@@ -102,7 +102,7 @@
   - [Playwright-MCP UI Verification](#81-playwright-mcp-ui-verification)
   - [Pause-Work Expansion](#82-pause-work-expansion)
   - [Response Language Config](#83-response-language-config)
-  - [Manual Update Procedure](#84-manual-update-procedure)
+  - [Manual Update (retired)](#84-manual-update-retired)
   - [New Runtime Support (Trae, Cline, Augment Code)](#85-new-runtime-support-trae-cline-augment-code)
   - [Autonomous `--interactive` Flag](#86-autonomous---interactive-flag)
   - [Commit-Docs Guard Hook](#87-commit-docs-guard-hook)
@@ -160,7 +160,7 @@
   - [Playwright-MCP UI Verification](#81-playwright-mcp-ui-verification)
   - [Pause-Work Expansion](#82-pause-work-expansion)
   - [Response Language Config](#83-response-language-config)
-  - [Manual Update Procedure](#84-manual-update-procedure)
+  - [Manual Update (retired)](#84-manual-update-retired)
   - [New Runtime Support (Trae, Cline, Augment Code)](#85-new-runtime-support-trae-cline-augment-code)
   - [Autonomous `--interactive` Flag](#86-autonomous---interactive-flag)
   - [Commit-Docs Guard Hook](#87-commit-docs-guard-hook)
@@ -891,18 +891,9 @@ continues. Drift detection cannot fail verification.
 
 ---
 
-### 31. Update System
+### 31. Legacy Update System (retired)
 
-**Command:** `/gsd-update`
-
-**Purpose:** Update GSD to the latest version with changelog preview.
-
-**Requirements:**
-- REQ-UPDATE-01: System MUST check for new versions via npm
-- REQ-UPDATE-02: System MUST display changelog for new version before updating
-- REQ-UPDATE-03: System MUST be runtime-aware and target the correct directory
-- REQ-UPDATE-04: System MUST back up locally modified files to `gsd-local-patches/`
-- REQ-UPDATE-05: `/gsd-reapply-patches` MUST restore local modifications after update
+The former `/gsd-update` command is retired. Use guarded OpenGSD maintenance for the installed release. The old npm update requirements below are historical and no longer active.
 
 ---
 
@@ -1020,12 +1011,12 @@ fix(03-01): correct auth token expiry
 
 ### 37. Hook System
 
-**Purpose:** Runtime event hooks for context monitoring, status display, and update checking.
+**Purpose:** Runtime event hooks for context monitoring and status display; legacy update checks are retired.
 
 **Requirements:**
 - REQ-HOOK-01: Statusline MUST display model, current task, directory, and context usage
 - REQ-HOOK-02: Context monitor MUST inject agent-facing warnings at threshold levels
-- REQ-HOOK-03: Update checker MUST run in background on session start
+- REQ-HOOK-03: Legacy update checker retired
 - REQ-HOOK-04: All hooks MUST respect `CLAUDE_CONFIG_DIR` env var
 - REQ-HOOK-05: All hooks MUST include 3-second stdin timeout guard
 - REQ-HOOK-06: All hooks MUST fail silently on any error
@@ -1033,7 +1024,7 @@ fix(03-01): correct auth token expiry
 
 **Statusline Display:**
 ```
-[⬆ /gsd-update │] model │ [current task │] directory [█████░░░░░ 50%]
+ model │ [current task │] directory [█████░░░░░ 50%]
 ```
 
 Color coding: <50% green, <65% yellow, <80% orange, ≥80% red with skull emoji
@@ -1412,7 +1403,7 @@ Test suite that scans all agent, workflow, and command files for embedded inject
 
 ### 55. Multi-Runtime Installer Selection
 
-**Part of:** `npx get-shit-done-cc`
+**Historical component:** retired legacy installer
 
 **Purpose:** Select multiple runtimes in a single interactive install session.
 
@@ -1431,7 +1422,7 @@ Test suite that scans all agent, workflow, and command files for embedded inject
 
 ### 56. Windsurf Runtime Support
 
-**Part of:** `npx get-shit-done-cc`
+**Historical component:** retired legacy installer
 
 **Purpose:** Add Windsurf as a supported AI CLI runtime for GSD installation and execution.
 
@@ -1671,7 +1662,7 @@ Test suite that scans all agent, workflow, and command files for embedded inject
 
 ### 68. Claude Code Skills Migration
 
-**Part of:** `npx get-shit-done-cc`
+**Historical component:** retired legacy installer
 
 **Purpose:** Migrate GSD commands to Claude Code 2.1.88+ skills format with backward compatibility.
 
@@ -1921,21 +1912,15 @@ Test suite that scans all agent, workflow, and command files for embedded inject
 
 ---
 
-### 84. Manual Update Procedure
+### 84. Manual Update (retired)
 
-**Part of:** `docs/manual-update.md`
-
-**Purpose:** Document a manual update path for environments where `npx` is unavailable or npm publish is experiencing outages.
-
-**Requirements:**
-- REQ-MANUAL-01: Documentation MUST describe step-by-step manual update procedure
-- REQ-MANUAL-02: Procedure MUST work without npm access
+`docs/manual-update.md` now contains a retirement notice. Use guarded OpenGSD maintenance.
 
 ---
 
 ### 85. New Runtime Support (Trae, Cline, Augment Code)
 
-**Part of:** `npx get-shit-done-cc`
+**Historical component:** retired legacy installer
 
 **Purpose:** Extend GSD installation to Trae IDE, Cline, and Augment Code runtimes.
 
@@ -2277,7 +2262,7 @@ Test suite that scans all agent, workflow, and command files for embedded inject
 
 ### 104. New Runtime Support (Cline, CodeBuddy, Qwen Code)
 
-**Part of:** `npx get-shit-done-cc`
+**Historical component:** retired legacy installer
 
 **Purpose:** Extend GSD installation to Cline, CodeBuddy, and Qwen Code runtimes.
 

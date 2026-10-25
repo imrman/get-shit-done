@@ -156,28 +156,6 @@ describe('outright deleted dead skills are removed', () => {
 // Group: Parent skills updated with new flags
 // ---------------------------------------------------------------------------
 describe('parent skills updated with new flags in argument-hint', () => {
-  test('update.md argument-hint contains --sync', () => {
-    const fm = parseFrontmatter(skillPath('update'));
-    assert.ok(
-      (fm['argument-hint'] || '').includes('--sync'),
-      [
-        'update.md argument-hint does not contain --sync',
-        'got: ' + (fm['argument-hint'] || '(none)'),
-      ].join('. '),
-    );
-  });
-
-  test('update.md argument-hint contains --reapply', () => {
-    const fm = parseFrontmatter(skillPath('update'));
-    assert.ok(
-      (fm['argument-hint'] || '').includes('--reapply'),
-      [
-        'update.md argument-hint does not contain --reapply',
-        'got: ' + (fm['argument-hint'] || '(none)'),
-      ].join('. '),
-    );
-  });
-
   test('sketch.md argument-hint contains --wrap-up', () => {
     const fm = parseFrontmatter(skillPath('sketch'));
     assert.ok(
