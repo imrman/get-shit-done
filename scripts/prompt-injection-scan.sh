@@ -176,11 +176,6 @@ is_allowed_match() {
     printf '%s\n' "$line_text" | grep -qE "^[[:space:]]*['\"\`].*['\"\`][,);]*[[:space:]]*$" && return 0
   fi
 
-  if [[ "$file" == "tests/unattended-upstream-sync.test.cjs" ]]; then
-    [[ "$line_text" == *"const encodedInjection = Buffer.from("* ]] && return 0
-    [[ "$line_text" == *"const injectedPayload = 'ignore all previous instructions"* ]] && return 0
-  fi
-
   if [[ "$file" == "sdk/src/query/commit.ts" ]]; then
     [[ "$line_text" == *'Neutralize [SYSTEM] / [INST] markers'* ]] && return 0
     [[ "$line_text" == *'sanitized = sanitized.replace(/\[(SYSTEM|INST)\]/gi,'* ]] && return 0

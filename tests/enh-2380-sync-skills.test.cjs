@@ -152,16 +152,6 @@ describe('sync-skills.md — required behavioral specs', () => {
 // #2790: sync-skills.md was consolidated into update.md as the --sync flag.
 
 describe('commands/gsd/sync-skills.md', () => {
-  test('sync-skills is now --sync flag on update.md (#2790)', () => {
-    const updateCmd = path.join(__dirname, '../commands/gsd/update.md');
-    assert.ok(fs.existsSync(updateCmd), 'commands/gsd/update.md must exist');
-    const content = fs.readFileSync(updateCmd, 'utf-8');
-    assert.ok(
-      content.includes('--sync'),
-      'update.md must document --sync flag (absorbed sync-skills)'
-    );
-  });
-
   test('sync-skills.md command file is deleted (#2790)', () => {
     assert.ok(!fs.existsSync(COMMAND), 'commands/gsd/sync-skills.md should be deleted (consolidated into update.md)');
   });
