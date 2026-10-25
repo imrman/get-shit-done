@@ -5,8 +5,9 @@
  * PreToolUse hook entry in install.js. This test ensures the registration block
  * exists with the correct structure.
  *
- * Also tests the broader anti-pattern: every hook in gsdHooks that is a JS
- * PreToolUse/PostToolUse hook should have a corresponding registration block.
+ * Also tests the broader anti-pattern: every JS event hook in gsdHooks should
+ * have a corresponding registration block. The legacy worker stub is cleanup-
+ * only and must not be registered.
  */
 const { describe, test } = require('node:test');
 const assert = require('node:assert/strict');
@@ -63,8 +64,9 @@ describe('workflow-guard hook registration (#1767)', () => {
 });
 
 describe('hook registration completeness anti-pattern guard', () => {
-  test('every JS hook in gsdHooks has a command construction in install.js', () => {
+  test('every JS event hook in gsdHooks has a command construction in install.js', () => {
     const content = fs.readFileSync(INSTALL_JS, 'utf-8');
+    const cleanupOnlyHook = 'gsd-check-update-worker.js';
     // Extract gsdHooks array entries
     const hooksMatch = content.match(/gsdHooks\s*=\s*\[([^\]]+)\]/);
     assert.ok(hooksMatch, 'gsdHooks array must exist in install.js');
@@ -73,7 +75,7 @@ describe('hook registration completeness anti-pattern guard', () => {
       .match(/'([^']+)'/g)
       .map(h => h.replace(/'/g, ''));
 
-    const jsHooks = hookNames.filter(h => h.endsWith('.js'));
+    const jsHooks = hookNames.filter(h => h.endsWith('.js') && h !== cleanupOnlyHook);
 
     const missing = [];
     for (const hook of jsHooks) {
@@ -92,10 +94,25 @@ describe('hook registration completeness anti-pattern guard', () => {
     assert.strictEqual(
       missing.length, 0,
       [
-        'Every JS hook in gsdHooks must have a command construction in install.js.',
+        'Every JS event hook in gsdHooks must have a command construction in install.js.',
         'Missing registration for:',
         ...missing.map(h => `  - ${h}`),
       ].join('\n')
+    );
+  });
+
+  test('cleanup-only legacy worker has no command construction or registration', () => {
+    const content = fs.readFileSync(INSTALL_JS, 'utf-8');
+    const cleanupOnlyHook = 'gsd-check-update-worker.js';
+    const commandConstructionLines = content.split('\n').filter(line =>
+      line.includes(cleanupOnlyHook) &&
+      (line.includes('buildHookCommand') || line.includes("'node '") || /command\s*:/i.test(line))
+    );
+
+    assert.deepStrictEqual(
+      commandConstructionLines,
+      [],
+      `${cleanupOnlyHook} is cleanup-only and must not be registered`
     );
   });
 });
