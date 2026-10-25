@@ -160,9 +160,10 @@ describe('commands/gsd/sync-skills.md', () => {
 // ── INVENTORY sync ────────────────────────────────────────────────────────────
 
 describe('INVENTORY sync', () => {
-  test('INVENTORY.md lists /gsd-update --sync command (#2790: absorbed /gsd-sync-skills)', () => {
+  test('INVENTORY.md marks /gsd-update retired without advertising --sync', () => {
     const inventory = fs.readFileSync(path.join(__dirname, '../docs/INVENTORY.md'), 'utf-8');
-    assert.ok(inventory.includes('/gsd-update --sync'), 'INVENTORY.md must list /gsd-update --sync (absorbed /gsd-sync-skills in #2790)');
+    assert.match(inventory, /\| `\/gsd-update` \| Retired legacy update command;/);
+    assert.ok(!inventory.includes('/gsd-update --sync'), 'INVENTORY.md must not advertise the retired --sync command');
   });
 
   test('INVENTORY.md lists sync-skills.md workflow', () => {
