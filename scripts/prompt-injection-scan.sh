@@ -330,6 +330,7 @@ scan_file() {
   local file="$1"
   local mode="${2:-}"
   local found=0
+  local contains_invisible=0
   local normalized_content=""
   local invisible_normalized_content=""
 
@@ -356,6 +357,7 @@ scan_file() {
   fi
 
   if has_invisible_unicode "$file"; then
+    contains_invisible=1
     if [[ $found -eq 0 ]]; then
       echo "FAIL: $(sanitize_file_id "$file")"
       found=1
@@ -364,15 +366,17 @@ scan_file() {
   fi
 
   normalized_content="$(tr '\r\n\t' '   ' < "$file")"
-  invisible_normalized_content="$(printf '%s\n' "$normalized_content" | normalize_invisible_unicode)"
-  if printf '%s\n' "$invisible_normalized_content" | grep -iqE -e "$COMBINED_PATTERN" 2>/dev/null &&
-    ! printf '%s\n' "$normalized_content" | grep -iqE -e "$COMBINED_PATTERN" 2>/dev/null; then
-    if [[ $found -eq 0 ]]; then
-      echo "FAIL: $(sanitize_file_id "$file")"
-      found=1
+  if [[ $contains_invisible -eq 1 ]]; then
+    invisible_normalized_content="$(printf '%s\n' "$normalized_content" | normalize_invisible_unicode)"
+    if printf '%s\n' "$invisible_normalized_content" | grep -iqE -e "$COMBINED_PATTERN" 2>/dev/null &&
+      ! printf '%s\n' "$normalized_content" | grep -iqE -e "$COMBINED_PATTERN" 2>/dev/null; then
+      if [[ $found -eq 0 ]]; then
+        echo "FAIL: $(sanitize_file_id "$file")"
+        found=1
+      fi
+      echo "  line 1: matched pattern after invisible Unicode normalization"
+      echo "    pattern: prompt injection pattern"
     fi
-    echo "  line 1: matched pattern after invisible Unicode normalization"
-    echo "    pattern: prompt injection pattern"
   fi
   if printf '%s\n' "$normalized_content" | grep -iqE -e "$COMBINED_PATTERN" 2>/dev/null; then
     local -a file_lines=()
